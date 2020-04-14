@@ -20,4 +20,17 @@ fn main() {
     let start = std::time::Instant::now();
     m.run();
     println!("it took {:.3} s", start.elapsed().as_secs_f64());
+    let mut num_executed = 0;
+    let mut num_modified = 0;
+    for s in &m.stats.word_states {
+        match s {
+            crate::interp::WordState::Initial => {}
+            crate::interp::WordState::Executed => num_executed += 1,
+            crate::interp::WordState::Modified => num_modified += 1,
+        }
+    }
+    dbg!(num_executed);
+    dbg!(num_modified);
+    m.stats.word_states.clear();
+    println!("{:#?}", m.stats);
 }
