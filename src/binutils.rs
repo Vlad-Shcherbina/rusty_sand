@@ -32,7 +32,7 @@ pub fn bytes_to_obj(bytes: &[u8], obj_filename: &str) {
 
 fn objdump_raw(obj_filename: &str) -> String {
     let p = Command::new("bash")
-        .args(&["-c", &format!("objdump -d {}", obj_filename)])
+        .args(&["-c", &format!("objdump -d {} --insn-width=15", obj_filename)])
         .stdout(Stdio::piped())
         .spawn().unwrap();
     let res = p.wait_with_output().unwrap();
