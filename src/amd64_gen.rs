@@ -3,13 +3,114 @@ use std::convert::{TryFrom, TryInto};
 #[derive(Clone, Copy, Debug)]
 pub enum R8 {
     Al = 0,
-    // TODO
+    Cl,
+    Dl,
+    Bl,
+    // TODO:
+    //   ah, ch, dh, bh  -- not addressable in REX prefix insn forms
+    //   spl, bpl, sil, dil  -- only addressable in REX prefix insn forms
+    R8b = 8,
+    R9b,
+    R10b,
+    R11b,
+    R12b,
+    R13b,
+    R14b,
+    R15b,
+}
+
+impl R8 {
+    pub fn all() -> impl Iterator<Item=R8> {
+        (0..4).chain(8..16).map(|x| x.try_into().unwrap())
+    }
+}
+
+impl std::fmt::Display for R8 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut name = format!("{:?}", self);
+        name.make_ascii_lowercase();
+        write!(f, "{}", name)
+    }
+}
+
+impl TryFrom<u8> for R8 {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => R8::Al,
+            1 => R8::Bl,
+            2 => R8::Cl,
+            3 => R8::Dl,
+            8 => R8::R8b,
+            9 => R8::R9b,
+            10 => R8::R10b,
+            11 => R8::R11b,
+            12 => R8::R12b,
+            13 => R8::R13b,
+            14 => R8::R14b,
+            15 => R8::R15b,
+            _ => return Err(()),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum R16 {
     Ax = 0,
-    // TODO
+    Cx,
+    Dx,
+    Bx,
+    Sp,
+    Bp,
+    Si,
+    Di,
+    R8w,
+    R9w,
+    R10w,
+    R11w,
+    R12w,
+    R13w,
+    R14w,
+    R15w,
+}
+
+impl R16 {
+    pub fn all() -> impl Iterator<Item=R16> {
+        (0..16).map(|x| x.try_into().unwrap())
+    }
+}
+
+impl std::fmt::Display for R16 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut name = format!("{:?}", self);
+        name.make_ascii_lowercase();
+        write!(f, "{}", name)
+    }
+}
+
+impl TryFrom<u8> for R16 {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => R16::Ax,
+            1 => R16::Cx,
+            2 => R16::Dx,
+            3 => R16::Bx,
+            4 => R16::Sp,
+            5 => R16::Bp,
+            6 => R16::Si,
+            7 => R16::Di,
+            8 => R16::R8w,
+            9 => R16::R9w,
+            10 => R16::R10w,
+            11 => R16::R11w,
+            12 => R16::R12w,
+            13 => R16::R13w,
+            14 => R16::R14w,
+            15 => R16::R15w,
+            _ => return Err(()),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -74,7 +175,60 @@ impl TryFrom<u8> for R32 {
 #[derive(Clone, Copy, Debug)]
 pub enum R64 {
     Rax = 0,
-    // TODO
+    Rcx,
+    Rdx,
+    Rbx,
+    Rsp,
+    Rbp,
+    Rsi,
+    Rdi,
+    R8,
+    R9,
+    R10,
+    R11,
+    R12,
+    R13,
+    R14,
+    R15,
+}
+
+impl R64 {
+    pub fn all() -> impl Iterator<Item=R64> {
+        (0..16).map(|x| x.try_into().unwrap())
+    }
+}
+
+impl std::fmt::Display for R64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut name = format!("{:?}", self);
+        name.make_ascii_lowercase();
+        write!(f, "{}", name)
+    }
+}
+
+impl TryFrom<u8> for R64 {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => R64::Rax,
+            1 => R64::Rcx,
+            2 => R64::Rdx,
+            3 => R64::Rbx,
+            4 => R64::Rsp,
+            5 => R64::Rbp,
+            6 => R64::Rsi,
+            7 => R64::Rdi,
+            8 => R64::R8,
+            9 => R64::R9,
+            10 => R64::R10,
+            11 => R64::R11,
+            12 => R64::R12,
+            13 => R64::R13,
+            14 => R64::R14,
+            15 => R64::R15,
+            _ => return Err(()),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -169,15 +323,24 @@ struct RmEncoding {
     buf_len: usize,
 }
 
-fn encode_reg_or_mem(op: Operand) -> RmEncoding {
-    match op {
-        Operand::R32(r) => RmEncoding {
+impl RmEncoding {
+    fn from_reg(r: u8) -> Self {
+        Self {
             rex_rxb: r as u8 >> 3,
             modrm: 0b11_000_000 | (r as u8 & 7),
             buf: [0; 9],
             buf_len: 0,
-        },
-        _ => panic!("{:?}", op),
+        }
+    }
+
+    fn from_reg_or_mem(op: Operand) -> Self {
+        match op {
+            Operand::R8(r) => Self::from_reg(r as u8),
+            Operand::R16(r) => Self::from_reg(r as u8),
+            Operand::R32(r) => Self::from_reg(r as u8),
+            Operand::R64(r) => Self::from_reg(r as u8),
+            _ => panic!("{:?}", op),
+        }
     }
 }
 
@@ -213,18 +376,45 @@ impl Gen {
         let src: Operand = src.into();
         let dst: Operand = dst.into();
 
+        let size_bits = match (src.size_bits(), dst.size_bits()) {
+            (Some(s1), Some(s2)) => {
+                assert_eq!(s1, s2);
+                s1
+            },
+            (Some(s1), None) => s1,
+            (None, Some(s2)) => s2,
+            (None, None) => panic!("{:?} {:?}", src, dst),
+        };
+
         let mut gen = Gen::default();
         let src = match src {
+            Operand::R8(src) => src as u8,
+            Operand::R16(src) => src as u8,
             Operand::R32(src) => src as u8,
+            Operand::R64(src) => src as u8,
             _ => panic!("{:?}", src)
         };
 
-        let enc = encode_reg_or_mem(dst);
-        let rex = enc.rex_rxb | ((src & 8) >> 1);
+        if size_bits == 16 {
+            gen.write_u8(0x66);
+        }
+
+        let enc = RmEncoding::from_reg_or_mem(dst);
+        let mut rex = enc.rex_rxb | ((src & 8) >> 1);
+        if size_bits == 64 {
+            rex |= 8;
+        }
         if rex != 0 {
             gen.write_u8(0x40 | rex);
         }
-        gen.write_u8(1 + op as u8 * 8);  // opcode
+
+        // opcode
+        gen.write_u8(match size_bits {
+            8 => op as u8 * 8,
+            16 | 32 | 64 => op as u8 * 8 + 1,
+            _ => unreachable!(),
+        });
+
         gen.write_u8(enc.modrm | ((src & 7) << 3));
 
         gen.buf[gen.buf_len .. gen.buf_len + enc.buf_len].copy_from_slice(
@@ -240,11 +430,62 @@ mod tests {
     use crate::binutils::Obj;
 
     #[test]
+    fn add_r8_r8() {
+        for r1 in R8::all() {
+            let mut bytes = Vec::<u8>::new();
+            let mut expected = Vec::new();
+            for r2 in R8::all() {
+                bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
+                expected.push(format!("add    %{},%{}", r1, r2));
+            }
+            let insns = Obj::from_bytes(&bytes).insns();
+            assert_eq!(insns.len(), expected.len());
+            for (insn, expected) in insns.iter().zip(expected) {
+                assert_eq!(insn.text, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn add_r16_r16() {
+        for r1 in R16::all() {
+            let mut bytes = Vec::<u8>::new();
+            let mut expected = Vec::new();
+            for r2 in R16::all() {
+                bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
+                expected.push(format!("add    %{},%{}", r1, r2));
+            }
+            let insns = Obj::from_bytes(&bytes).insns();
+            assert_eq!(insns.len(), expected.len());
+            for (insn, expected) in insns.iter().zip(expected) {
+                assert_eq!(insn.text, expected);
+            }
+        }
+    }
+
+    #[test]
     fn add_r32_r32() {
         for r1 in R32::all() {
             let mut bytes = Vec::<u8>::new();
             let mut expected = Vec::new();
             for r2 in R32::all() {
+                bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
+                expected.push(format!("add    %{},%{}", r1, r2));
+            }
+            let insns = Obj::from_bytes(&bytes).insns();
+            assert_eq!(insns.len(), expected.len());
+            for (insn, expected) in insns.iter().zip(expected) {
+                assert_eq!(insn.text, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn add_r64_r64() {
+        for r1 in R64::all() {
+            let mut bytes = Vec::<u8>::new();
+            let mut expected = Vec::new();
+            for r2 in R64::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
                 expected.push(format!("add    %{},%{}", r1, r2));
             }
