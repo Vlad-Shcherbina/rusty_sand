@@ -181,6 +181,18 @@ fn encode_reg_or_mem(op: Operand) -> RmEncoding {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum Binop {
+    Add = 0,
+    Or,
+    Adc,
+    Sbb,
+    And,
+    Sub,
+    Xor,
+    Cmp,
+}
+
 #[derive(Default, Debug)]
 pub struct Gen {
     buf: [u8; 15],
@@ -197,7 +209,7 @@ impl Gen {
         &self.buf[0..self.buf_len]
     }
 
-    pub fn add(src: impl Into<Operand>, dst: impl Into<Operand>) -> Gen {
+    pub fn binop(op: Binop, src: impl Into<Operand>, dst: impl Into<Operand>) -> Gen {
         let src: Operand = src.into();
         let dst: Operand = dst.into();
 
@@ -212,7 +224,7 @@ impl Gen {
         if rex != 0 {
             gen.write_u8(0x40 | rex);
         }
-        gen.write_u8(0x01);  // opcode
+        gen.write_u8(1 + op as u8 * 8);  // opcode
         gen.write_u8(enc.modrm | ((src & 7) << 3));
 
         gen.buf[gen.buf_len .. gen.buf_len + enc.buf_len].copy_from_slice(
@@ -233,7 +245,7 @@ mod tests {
             let mut bytes = Vec::<u8>::new();
             let mut expected = Vec::new();
             for r2 in R32::all() {
-                bytes.extend_from_slice(Gen::add(r1, r2).as_slice());
+                bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
                 expected.push(format!("add    %{},%{}", r1, r2));
             }
             let insns = Obj::from_bytes(&bytes).insns();
@@ -241,6 +253,25 @@ mod tests {
             for (insn, expected) in insns.iter().zip(expected) {
                 assert_eq!(insn.text, expected);
             }
+        }
+    }
+
+    #[test]
+    fn binops() {
+        use super::Binop::*;
+        let mut bytes = Vec::<u8>::new();
+        let mut expected = Vec::new();
+        for &binop in &[Add, Or, Adc, Sbb, And, Sub, Xor, Cmp] {
+            let mut binop_name = format!("{:?}", binop);
+            binop_name.make_ascii_lowercase();
+
+            bytes.extend_from_slice(Gen::binop(binop, R32::Ebx, R32::Ecx).as_slice());
+            expected.push(format!("{:3}    %ebx,%ecx", binop_name));
+        }
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), expected.len());
+        for (insn, expected) in insns.iter().zip(expected) {
+            assert_eq!(insn.text, expected);
         }
     }
 }
