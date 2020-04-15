@@ -45,8 +45,9 @@ impl Obj {
         let res = p.wait_with_output().unwrap();
         assert!(res.status.success());
 
-        let dump = std::str::from_utf8(&res.stdout).unwrap();
-        parse_objdump(dump)
+        let dump = String::from_utf8(res.stdout).unwrap();
+        assert!(!dump.is_empty(), "weird glitch, probably happens with large files");
+        parse_objdump(&dump)
     }
 }
 
