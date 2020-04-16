@@ -63,15 +63,19 @@ fn invoke_gas(obj_filename: &str) -> std::process::Child {
 pub struct Insn {
     pub bytes: Vec<u8>,
     pub text: String,
+    pub comment: String,
 }
 
 impl std::fmt::Debug for Insn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use crate::util::ByteSliceHex;
-        f.debug_struct("Insn")
-            .field("bytes", &self.bytes.fmt_hex())
-            .field("text", &self.text)
-            .finish()
+        let mut d = f.debug_struct("Insn");
+        d.field("bytes", &self.bytes.fmt_hex());
+        d.field("text", &self.text);
+        if !self.comment.is_empty() {
+            d.field("comment", &self.comment);
+        }
+        d.finish()
     }
 }
 
@@ -85,11 +89,13 @@ fn parse_objdump(dump: &str) -> Vec<Insn> {
             .split(' ')
             .map(|b| u8::from_str_radix(b, 16).unwrap())
             .collect();
-        let text = it.next().unwrap();
+        let text_and_comment = it.next().unwrap();
         assert!(it.next().is_none());
+        let pos = text_and_comment.find('#').unwrap_or_else(|| text_and_comment.len());
         Insn {
             bytes,
-            text: text.to_string(),
+            text: text_and_comment[..pos].trim().to_string(),
+            comment: text_and_comment[pos..].to_string(),
         }
     }).collect()
 }
@@ -110,8 +116,8 @@ mod tests {
     fn bytes() {
         let insns = Obj::from_bytes(&[0x89, 0xc3, 0x90]).insns();
         assert_eq!(insns, [
-            Insn { bytes: vec![0x89, 0xc3], text: "mov    %eax,%ebx".to_string() },
-            Insn { bytes: vec![0x90], text: "nop".to_string() },
+            Insn { bytes: vec![0x89, 0xc3], text: "mov    %eax,%ebx".to_string(), comment: String::new() },
+            Insn { bytes: vec![0x90], text: "nop".to_string(), comment: String::new() },
         ]);
     }
 }

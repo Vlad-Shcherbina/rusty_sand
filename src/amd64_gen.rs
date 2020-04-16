@@ -336,7 +336,7 @@ impl From<i64> for Operand {
 struct RmEncoding {
     rex_rxb: u8,
     modrm: u8,
-    buf: [u8; 9],  // optional sib, disp, imm
+    buf: [u8; 5],  // optional sib, disp
     buf_len: usize,
 }
 
@@ -345,7 +345,7 @@ impl RmEncoding {
         Self {
             rex_rxb: r as u8 >> 3,
             modrm: 0b11_000_000 | (r as u8 & 7),
-            buf: [0; 9],
+            buf: [0; 5],
             buf_len: 0,
         }
     }
@@ -356,6 +356,16 @@ impl RmEncoding {
             Operand::R16(r) => Self::from_reg(r as u8),
             Operand::R32(r) => Self::from_reg(r as u8),
             Operand::R64(r) => Self::from_reg(r as u8),
+            Operand::RipRel(disp) => {
+                let mut buf = [0; 5];
+                buf[..4].copy_from_slice(&disp.to_le_bytes());
+                Self {
+                    rex_rxb: 0,
+                    modrm: 0b00_000_101,
+                    buf,
+                    buf_len: 4,
+                }
+            }
             _ => panic!("{:?}", op),
         }
     }
@@ -597,5 +607,25 @@ mod tests {
         let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R64::Rbx, 0x42i64).as_slice()).insns();
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].text, "adc    $0x42,%rbx");
+    }
+
+    #[test]
+    fn binop_rip_rel() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(
+            Gen::binop(Binop::Adc, Operand::RipRel(0x42), R8::Dl).as_slice());
+        bytes.extend_from_slice(
+            Gen::binop(Binop::Adc, Operand::RipRel(0x42), R16::Dx).as_slice());
+        bytes.extend_from_slice(
+            Gen::binop(Binop::Adc, Operand::RipRel(0x42), R32::Edx).as_slice());
+        bytes.extend_from_slice(
+            Gen::binop(Binop::Adc, Operand::RipRel(0x42), R64::Rdx).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        dbg!(&insns);
+        assert_eq!(insns.len(), 4);
+        assert_eq!(insns[0].text, "adc    %dl,0x42(%rip)");
+        assert_eq!(insns[1].text, "adc    %dx,0x42(%rip)");
+        assert_eq!(insns[2].text, "adc    %edx,0x42(%rip)");
+        assert_eq!(insns[3].text, "adc    %rdx,0x42(%rip)");
     }
 }
