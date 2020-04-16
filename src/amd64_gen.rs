@@ -372,7 +372,7 @@ impl Gen {
         &self.buf[0..self.buf_len]
     }
 
-    pub fn binop(op: Binop, src: impl Into<Operand>, dst: impl Into<Operand>) -> Gen {
+    pub fn binop(op: Binop, dst: impl Into<Operand>, src: impl Into<Operand>) -> Gen {
         let src: Operand = src.into();
         let dst: Operand = dst.into();
 
@@ -436,7 +436,7 @@ mod tests {
             let mut expected = Vec::new();
             for r2 in R8::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
-                expected.push(format!("add    %{},%{}", r1, r2));
+                expected.push(format!("add    %{},%{}", r2, r1));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -453,7 +453,7 @@ mod tests {
             let mut expected = Vec::new();
             for r2 in R16::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
-                expected.push(format!("add    %{},%{}", r1, r2));
+                expected.push(format!("add    %{},%{}", r2, r1));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -470,7 +470,7 @@ mod tests {
             let mut expected = Vec::new();
             for r2 in R32::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
-                expected.push(format!("add    %{},%{}", r1, r2));
+                expected.push(format!("add    %{},%{}", r2, r1));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -487,7 +487,7 @@ mod tests {
             let mut expected = Vec::new();
             for r2 in R64::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
-                expected.push(format!("add    %{},%{}", r1, r2));
+                expected.push(format!("add    %{},%{}", r2, r1));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -507,7 +507,7 @@ mod tests {
             binop_name.make_ascii_lowercase();
 
             bytes.extend_from_slice(Gen::binop(binop, R32::Ebx, R32::Ecx).as_slice());
-            expected.push(format!("{:3}    %ebx,%ecx", binop_name));
+            expected.push(format!("{:3}    %ecx,%ebx", binop_name));
         }
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), expected.len());
