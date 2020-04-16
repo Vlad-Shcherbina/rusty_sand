@@ -367,27 +367,50 @@ impl RmEncoding {
                 }
             }
             Operand::Mem(mem) => {
-                assert!(mem.index_scale.is_none());
-                if mem.base as u8 & 7 == 4 {
-                    let sib = 0b00_100_100;
-                    let mut buf = [sib, 0, 0, 0, 0];
-                    buf[1..].copy_from_slice(&mem.disp.to_le_bytes());
-                    // TODO: use disp8 and no disp forms when appropriate
-                    Self {
-                        rex_rxb: mem.base as u8 >> 3,
-                        modrm: 0b10_000_100,
-                        buf,
-                        buf_len: 5,
+                match mem.index_scale {
+                    None => if mem.base as u8 & 7 != 4 {
+                        let mut buf = [0; 5];
+                        // TODO: use disp8 and no disp forms when appropriate
+                        buf[..4].copy_from_slice(&mem.disp.to_le_bytes());
+                        Self {
+                            rex_rxb: mem.base as u8 >> 3,
+                            modrm: 0b10_000_000 | (mem.base as u8 & 7),
+                            buf,
+                            buf_len: 4,
+                        }
+                    } else {
+                        let sib = 0b00_100_100;
+                        let mut buf = [sib, 0, 0, 0, 0];
+                        buf[1..].copy_from_slice(&mem.disp.to_le_bytes());
+                        // TODO: use disp8 and no disp forms when appropriate
+                        Self {
+                            rex_rxb: mem.base as u8 >> 3,
+                            modrm: 0b10_000_100,
+                            buf,
+                            buf_len: 5,
+                        }
                     }
-                } else {
-                    let mut buf = [0; 5];
-                    // TODO: use disp8 and no disp forms when appropriate
-                    buf[..4].copy_from_slice(&mem.disp.to_le_bytes());
-                    Self {
-                        rex_rxb: mem.base as u8 >> 3,
-                        modrm: 0b10_000_000 | (mem.base as u8 & 7),
-                        buf,
-                        buf_len: 4,
+                    Some((index, scale)) => {
+                        assert!(index != R64::Rsp);
+                        let scale = match scale {
+                            1 => 0,
+                            2 => 1,
+                            4 => 2,
+                            8 => 3,
+                            _ => panic!("{}", scale),
+                        };
+                        let sib = (scale << 6)
+                            | ((index as u8 & 7) << 3)
+                            | (mem.base as u8 & 7);
+                        let mut buf = [sib, 0, 0, 0, 0];
+                        // TODO: use disp8 and no disp forms when appropriate
+                        buf[1..].copy_from_slice(&mem.disp.to_le_bytes());
+                        Self {
+                            rex_rxb: (mem.base as u8 >> 3) | (index as u8 >> 3 << 1),
+                            modrm: 0b10_000_100,
+                            buf,
+                            buf_len: 5,
+                        }
                     }
                 }
             }
@@ -665,6 +688,27 @@ mod tests {
         assert_eq!(insns.len(), expected.len());
         for (insn, expected) in insns.iter().zip(expected) {
             assert_eq!(insn.text, expected);
+        }
+    }
+
+    #[test]
+    fn sib() {
+        for base in R64::all() {
+            let mut bytes = Vec::<u8>::new();
+            let mut expected = Vec::new();
+            for index in R64::all() {
+                if index == R64::Rsp {
+                    continue;
+                }
+                bytes.extend_from_slice(
+                    Gen::binop(Binop::Add, Mem::new(base).index_scale(index, 4).disp(0x42), R32::Eax).as_slice());
+                expected.push(format!("add    %eax,0x42(%{},%{},4)", base, index));
+            }
+            let insns = Obj::from_bytes(&bytes).insns();
+            assert_eq!(insns.len(), expected.len());
+            for (insn, expected) in insns.iter().zip(expected) {
+                assert_eq!(insn.text, expected);
+            }
         }
     }
 }
