@@ -172,7 +172,7 @@ impl TryFrom<u8> for R32 {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum R64 {
     Rax = 0,
     Rcx,
@@ -364,6 +364,31 @@ impl RmEncoding {
                     modrm: 0b00_000_101,
                     buf,
                     buf_len: 4,
+                }
+            }
+            Operand::Mem(mem) => {
+                assert!(mem.index_scale.is_none());
+                if mem.base as u8 & 7 == 4 {
+                    let sib = 0b00_100_100;
+                    let mut buf = [sib, 0, 0, 0, 0];
+                    buf[1..].copy_from_slice(&mem.disp.to_le_bytes());
+                    // TODO: use disp8 and no disp forms when appropriate
+                    Self {
+                        rex_rxb: mem.base as u8 >> 3,
+                        modrm: 0b10_000_100,
+                        buf,
+                        buf_len: 5,
+                    }
+                } else {
+                    let mut buf = [0; 5];
+                    // TODO: use disp8 and no disp forms when appropriate
+                    buf[..4].copy_from_slice(&mem.disp.to_le_bytes());
+                    Self {
+                        rex_rxb: mem.base as u8 >> 3,
+                        modrm: 0b10_000_000 | (mem.base as u8 & 7),
+                        buf,
+                        buf_len: 4,
+                    }
                 }
             }
             _ => panic!("{:?}", op),
@@ -621,11 +646,25 @@ mod tests {
         bytes.extend_from_slice(
             Gen::binop(Binop::Adc, Operand::RipRel(0x42), R64::Rdx).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
-        dbg!(&insns);
         assert_eq!(insns.len(), 4);
         assert_eq!(insns[0].text, "adc    %dl,0x42(%rip)");
         assert_eq!(insns[1].text, "adc    %dx,0x42(%rip)");
         assert_eq!(insns[2].text, "adc    %edx,0x42(%rip)");
         assert_eq!(insns[3].text, "adc    %rdx,0x42(%rip)");
+    }
+
+    #[test]
+    fn mem_single_reg() {
+        let mut bytes = Vec::<u8>::new();
+        let mut expected = Vec::new();
+        for r in R64::all() {
+            bytes.extend_from_slice(Gen::binop(Binop::Add, Mem::new(r), R32::Eax).as_slice());
+            expected.push(format!("add    %eax,0x0(%{})", r));
+        }
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), expected.len());
+        for (insn, expected) in insns.iter().zip(expected) {
+            assert_eq!(insn.text, expected);
+        }
     }
 }
