@@ -273,8 +273,10 @@ pub enum Operand {
     R64(R64),
     RipRel(i32),
     Mem(Mem),
-    ImmU32(u32),
-    // TODO: imm u8, imm i8, etc.
+    Imm8(i8),
+    Imm16(i16),
+    Imm32(i32),
+    Imm64(i64),
 }
 
 impl Operand {
@@ -286,7 +288,10 @@ impl Operand {
             Operand::R64(_) => Some(64),
             Operand::RipRel(_) => None,
             Operand::Mem(_) => None,
-            Operand::ImmU32(_) => Some(32),
+            Operand::Imm8(_) => Some(8),
+            Operand::Imm16(_) => Some(16),
+            Operand::Imm32(_) => Some(32),
+            Operand::Imm64(_) => Some(64),
         }
     }
 }
@@ -311,8 +316,20 @@ impl From<Mem> for Operand {
     fn from(m: Mem) -> Self { Self::Mem(m) }
 }
 
-impl From<u32> for Operand {
-    fn from(imm: u32) -> Self { Self::ImmU32(imm) }
+impl From<i8> for Operand {
+    fn from(imm: i8) -> Self { Self::Imm8(imm) }
+}
+
+impl From<i16> for Operand {
+    fn from(imm: i16) -> Self { Self::Imm16(imm) }
+}
+
+impl From<i32> for Operand {
+    fn from(imm: i32) -> Self { Self::Imm32(imm) }
+}
+
+impl From<i64> for Operand {
+    fn from(imm: i64) -> Self { Self::Imm64(imm) }
 }
 
 #[derive(Default)]
@@ -368,6 +385,11 @@ impl Gen {
         self.buf_len += 1;
     }
 
+    fn write_slice(&mut self, xs: &[u8]) {
+        self.buf[self.buf_len..][..xs.len()].copy_from_slice(xs);
+        self.buf_len += xs.len();
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         &self.buf[0..self.buf_len]
     }
@@ -387,20 +409,67 @@ impl Gen {
         };
 
         let mut gen = Gen::default();
-        let src = match src {
-            Operand::R8(src) => src as u8,
-            Operand::R16(src) => src as u8,
-            Operand::R32(src) => src as u8,
-            Operand::R64(src) => src as u8,
-            _ => panic!("{:?}", src)
-        };
-
         if size_bits == 16 {
             gen.write_u8(0x66);
         }
 
-        let enc = RmEncoding::from_reg_or_mem(dst);
-        let mut rex = enc.rex_rxb | ((src & 8) >> 1);
+        let imm8;
+        let imm16;
+        let imm32;
+        let imm_slice;
+
+        let reg;
+        let rm;
+        let opcode;
+        match (dst, src) {
+            (dst, Operand::Imm8(imm)) => {
+                rm = dst;
+                reg = op as u8;
+                opcode = 0x80;
+                imm8 = imm as u8;
+                imm_slice = std::slice::from_ref(&imm8);
+            }
+            (dst, Operand::Imm16(imm)) => {
+                rm = dst;
+                reg = op as u8;
+                opcode = 0x81;
+                imm16 = (imm as u16).to_le_bytes();
+                imm_slice = &imm16;
+            }
+            (dst, Operand::Imm32(imm)) => {
+                rm = dst;
+                reg = op as u8;
+                opcode = 0x81;
+                imm32 = (imm as u32).to_le_bytes();
+                imm_slice = &imm32;
+            }
+            (dst, Operand::Imm64(imm)) => {
+                rm = dst;
+                reg = op as u8;
+                opcode = 0x81;
+                imm32 = (i32::try_from(imm).unwrap() as u32).to_le_bytes();
+                imm_slice = &imm32;
+            }
+            _ => {
+                reg = match src {
+                    Operand::R8(src) => src as u8,
+                    Operand::R16(src) => src as u8,
+                    Operand::R32(src) => src as u8,
+                    Operand::R64(src) => src as u8,
+                    _ => panic!("{:?}", src)
+                };
+                rm = dst;
+                opcode = match size_bits {
+                    8 => op as u8 * 8,
+                    16 | 32 | 64 => op as u8 * 8 + 1,
+                    _ => unreachable!(),
+                };
+                imm_slice = &[];
+            }
+        }
+
+        let enc = RmEncoding::from_reg_or_mem(rm);
+        let mut rex = enc.rex_rxb | ((reg & 8) >> 1);
         if size_bits == 64 {
             rex |= 8;
         }
@@ -408,17 +477,12 @@ impl Gen {
             gen.write_u8(0x40 | rex);
         }
 
-        // opcode
-        gen.write_u8(match size_bits {
-            8 => op as u8 * 8,
-            16 | 32 | 64 => op as u8 * 8 + 1,
-            _ => unreachable!(),
-        });
+        gen.write_u8(opcode);
 
-        gen.write_u8(enc.modrm | ((src & 7) << 3));
+        gen.write_u8(enc.modrm | ((reg & 7) << 3));
 
-        gen.buf[gen.buf_len .. gen.buf_len + enc.buf_len].copy_from_slice(
-            &enc.buf[..enc.buf_len]);
+        gen.write_slice(&enc.buf[..enc.buf_len]);
+        gen.write_slice(imm_slice);
 
         gen
     }
@@ -498,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn binops() {
+    fn all_binops() {
         use super::Binop::*;
         let mut bytes = Vec::<u8>::new();
         let mut expected = Vec::new();
@@ -514,5 +578,24 @@ mod tests {
         for (insn, expected) in insns.iter().zip(expected) {
             assert_eq!(insn.text, expected);
         }
+    }
+
+    #[test]
+    fn binop_imm() {
+        let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R8::Bl, 0x42i8).as_slice()).insns();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].text, "adc    $0x42,%bl");
+
+        let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R16::Bx, 0x42i16).as_slice()).insns();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].text, "adc    $0x42,%bx");
+
+        let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R32::Ebx, 0x42i32).as_slice()).insns();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].text, "adc    $0x42,%ebx");
+
+        let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R64::Rbx, 0x42i64).as_slice()).insns();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].text, "adc    $0x42,%rbx");
     }
 }
