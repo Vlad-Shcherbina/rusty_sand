@@ -640,6 +640,33 @@ impl Gen {
         gen.write_slice(&enc.buf[..enc.buf_len]);
         gen
     }
+
+    pub fn call(target: impl Into<JumpTarget>) -> Gen {
+        let mut target: JumpTarget = target.into();
+        if let JumpTarget::Rel8(rel) = target {
+            target = JumpTarget::Rel32(rel.into());
+        }
+        let mut gen = Gen::default();
+
+        let enc = match target {
+            JumpTarget::Rel8(_) => unreachable!(),
+            JumpTarget::Rel32(rel) => {
+                gen.buf[0] = 0xe8;
+                gen.buf[1..5].copy_from_slice(&rel.to_le_bytes());
+                gen.buf_len = 5;
+                return gen;
+            }
+            JumpTarget::Reg(r) => RmEncoding::from_reg(r as u8),
+            JumpTarget::Mem(m) => RmEncoding::from_mem(m),
+        };
+        if enc.rex_rxb != 0 {
+            gen.write_u8(enc.rex_rxb | 0x40)
+        }
+        gen.write_u8(0xff);  // opcode
+        gen.write_u8(enc.modrm | (2 << 3));
+        gen.write_slice(&enc.buf[..enc.buf_len]);
+        gen
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -913,6 +940,28 @@ mod tests {
             (JumpTarget::Mem(Mem::RipRel(0x42)), "jmpq   *0x42(%rip)")
         ] {
             bytes.extend_from_slice(Gen::jump(target).as_slice());
+            expected.push(e);
+        }
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), expected.len());
+        for (insn, expected) in insns.iter().zip(expected) {
+            assert_eq!(insn.text, expected);
+        }
+    }
+
+    #[test]
+    fn call() {
+        let mut bytes = Vec::<u8>::new();
+        let mut expected = Vec::new();
+        for &(target, e) in &[
+            (JumpTarget::Rel8(-2), "callq  0x3"),
+            (JumpTarget::Rel32(1), "callq  0xb"),
+            (JumpTarget::Reg(R64::Rax), "callq  *%rax"),
+            (JumpTarget::Reg(R64::R9), "callq  *%r9"),
+            (JumpTarget::Mem(Mem::base(R64::Rbx).disp(0x42)), "callq  *0x42(%rbx)"),
+            (JumpTarget::Mem(Mem::RipRel(0x42)), "callq  *0x42(%rip)")
+        ] {
+            bytes.extend_from_slice(Gen::call(target).as_slice());
             expected.push(e);
         }
         let insns = Obj::from_bytes(&bytes).insns();
