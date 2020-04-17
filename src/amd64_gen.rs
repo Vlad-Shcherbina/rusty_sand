@@ -584,14 +584,12 @@ impl Gen {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum JumpTarget {
+pub enum RelJumpTarget {
     Rel8(i8),
     Rel32(i32),
-    Reg(R64),
-    Mem(Mem),
 }
 
-impl From<i32> for JumpTarget {
+impl From<i32> for RelJumpTarget {
     fn from(rel: i32) -> Self {
         match i8::try_from(rel) {
             Ok(rel) => Self::Rel8(rel),
@@ -600,72 +598,49 @@ impl From<i32> for JumpTarget {
     }
 }
 
-impl From<R64> for JumpTarget {
+impl Gen {
+    pub fn jump(target: impl Into<RelJumpTarget>) -> Gen {
+        let target: RelJumpTarget = target.into();
+        let mut gen = Gen::default();
+        match target {
+            RelJumpTarget::Rel8(rel) => {
+                gen.buf[0] = 0xeb;
+                gen.buf[1] = rel as u8;
+                gen.buf_len = 2;
+            }
+            RelJumpTarget::Rel32(rel) => {
+                gen.buf[0] = 0xe9;
+                gen.buf[1..5].copy_from_slice(&rel.to_le_bytes());
+                gen.buf_len = 5;
+            }
+        }
+        gen
+    }
+
+    pub fn call(rel: i32) -> Gen {
+        let mut gen = Gen::default();
+        gen.buf[0] = 0xe8;
+        gen.buf[1..5].copy_from_slice(&rel.to_le_bytes());
+        gen.buf_len = 5;
+        gen
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum IndirectJumpTarget {
+    Reg(R64),
+    Mem(Mem),
+}
+
+impl From<R64> for IndirectJumpTarget {
     fn from(r: R64) -> Self {
         Self::Reg(r)
     }
 }
 
-impl From<Mem> for JumpTarget {
+impl From<Mem> for IndirectJumpTarget {
     fn from(m: Mem) -> Self {
         Self::Mem(m)
-    }
-}
-
-impl Gen {
-    pub fn jump(target: impl Into<JumpTarget>) -> Gen {
-        let target: JumpTarget = target.into();
-        let mut gen = Gen::default();
-        let enc = match target {
-            JumpTarget::Rel8(rel) => {
-                gen.buf[0] = 0xeb;
-                gen.buf[1] = rel as u8;
-                gen.buf_len = 2;
-                return gen;
-            }
-            JumpTarget::Rel32(rel) => {
-                gen.buf[0] = 0xe9;
-                gen.buf[1..5].copy_from_slice(&rel.to_le_bytes());
-                gen.buf_len = 5;
-                return gen;
-            }
-            JumpTarget::Reg(r) => RmEncoding::from_reg(r as u8),
-            JumpTarget::Mem(m) => RmEncoding::from_mem(m),
-        };
-        if enc.rex_rxb != 0 {
-            gen.write_u8(enc.rex_rxb | 0x40)
-        }
-        gen.write_u8(0xff);  // opcode
-        gen.write_u8(enc.modrm | (4 << 3));
-        gen.write_slice(&enc.buf[..enc.buf_len]);
-        gen
-    }
-
-    pub fn call(target: impl Into<JumpTarget>) -> Gen {
-        let mut target: JumpTarget = target.into();
-        if let JumpTarget::Rel8(rel) = target {
-            target = JumpTarget::Rel32(rel.into());
-        }
-        let mut gen = Gen::default();
-
-        let enc = match target {
-            JumpTarget::Rel8(_) => unreachable!(),
-            JumpTarget::Rel32(rel) => {
-                gen.buf[0] = 0xe8;
-                gen.buf[1..5].copy_from_slice(&rel.to_le_bytes());
-                gen.buf_len = 5;
-                return gen;
-            }
-            JumpTarget::Reg(r) => RmEncoding::from_reg(r as u8),
-            JumpTarget::Mem(m) => RmEncoding::from_mem(m),
-        };
-        if enc.rex_rxb != 0 {
-            gen.write_u8(enc.rex_rxb | 0x40)
-        }
-        gen.write_u8(0xff);  // opcode
-        gen.write_u8(enc.modrm | (2 << 3));
-        gen.write_slice(&enc.buf[..enc.buf_len]);
-        gen
     }
 }
 
@@ -721,23 +696,56 @@ impl TryFrom<u8> for Cond {
 }
 
 impl Gen {
-    pub fn jump_cond(cond: Cond, target: impl Into<JumpTarget>) -> Gen {
-        let target: JumpTarget = target.into();
+    pub fn jump_cond(cond: Cond, target: impl Into<RelJumpTarget>) -> Gen {
+        let target: RelJumpTarget = target.into();
         let mut gen = Gen::default();
         match target {
-            JumpTarget::Rel8(rel) => {
+            RelJumpTarget::Rel8(rel) => {
                 gen.buf[0] = 0x70 | cond as u8;
                 gen.buf[1] = rel as u8;
                 gen.buf_len = 2;
             }
-            JumpTarget::Rel32(rel) => {
+            RelJumpTarget::Rel32(rel) => {
                 gen.buf[0] = 0x0f;
                 gen.buf[1] = 0x80 | cond as u8;
                 gen.buf[2..6].copy_from_slice(&rel.to_le_bytes());
                 gen.buf_len = 6;
             }
-            _ => panic!("conditional jumps only support relative targets, got {:?}", target)
         }
+        gen
+    }
+}
+
+impl Gen {
+    pub fn jump_indirect(target: impl Into<IndirectJumpTarget>) -> Gen {
+        let target: IndirectJumpTarget = target.into();
+        let mut gen = Gen::default();
+        let enc = match target {
+            IndirectJumpTarget::Reg(r) => RmEncoding::from_reg(r as u8),
+            IndirectJumpTarget::Mem(m) => RmEncoding::from_mem(m),
+        };
+        if enc.rex_rxb != 0 {
+            gen.write_u8(enc.rex_rxb | 0x40)
+        }
+        gen.write_u8(0xff);  // opcode
+        gen.write_u8(enc.modrm | (4 << 3));
+        gen.write_slice(&enc.buf[..enc.buf_len]);
+        gen
+    }
+
+    pub fn call_indirect(target: impl Into<IndirectJumpTarget>) -> Gen {
+        let target: IndirectJumpTarget = target.into();
+        let mut gen = Gen::default();
+        let enc = match target {
+            IndirectJumpTarget::Reg(r) => RmEncoding::from_reg(r as u8),
+            IndirectJumpTarget::Mem(m) => RmEncoding::from_mem(m),
+        };
+        if enc.rex_rxb != 0 {
+            gen.write_u8(enc.rex_rxb | 0x40)
+        }
+        gen.write_u8(0xff);  // opcode
+        gen.write_u8(enc.modrm | (2 << 3));
+        gen.write_slice(&enc.buf[..enc.buf_len]);
         gen
     }
 }
@@ -930,45 +938,19 @@ mod tests {
     #[test]
     fn jump() {
         let mut bytes = Vec::<u8>::new();
-        let mut expected = Vec::new();
-        for &(target, e) in &[
-            (JumpTarget::Rel8(-2), "jmp    0x0"),
-            (JumpTarget::Rel32(1), "jmpq   0x8"),
-            (JumpTarget::Reg(R64::Rax), "jmpq   *%rax"),
-            (JumpTarget::Reg(R64::R9), "jmpq   *%r9"),
-            (JumpTarget::Mem(Mem::base(R64::Rbx).disp(0x42)), "jmpq   *0x42(%rbx)"),
-            (JumpTarget::Mem(Mem::RipRel(0x42)), "jmpq   *0x42(%rip)")
-        ] {
-            bytes.extend_from_slice(Gen::jump(target).as_slice());
-            expected.push(e);
-        }
+        bytes.extend_from_slice(Gen::jump(-2).as_slice());
+        bytes.extend_from_slice(Gen::jump(RelJumpTarget::Rel32(-5)).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
-        assert_eq!(insns.len(), expected.len());
-        for (insn, expected) in insns.iter().zip(expected) {
-            assert_eq!(insn.text, expected);
-        }
+        assert_eq!(insns.len(), 2);
+        assert_eq!(insns[0].text, "jmp    0x0");
+        assert_eq!(insns[1].text, "jmpq   0x2");
     }
 
     #[test]
     fn call() {
-        let mut bytes = Vec::<u8>::new();
-        let mut expected = Vec::new();
-        for &(target, e) in &[
-            (JumpTarget::Rel8(-2), "callq  0x3"),
-            (JumpTarget::Rel32(1), "callq  0xb"),
-            (JumpTarget::Reg(R64::Rax), "callq  *%rax"),
-            (JumpTarget::Reg(R64::R9), "callq  *%r9"),
-            (JumpTarget::Mem(Mem::base(R64::Rbx).disp(0x42)), "callq  *0x42(%rbx)"),
-            (JumpTarget::Mem(Mem::RipRel(0x42)), "callq  *0x42(%rip)")
-        ] {
-            bytes.extend_from_slice(Gen::call(target).as_slice());
-            expected.push(e);
-        }
-        let insns = Obj::from_bytes(&bytes).insns();
-        assert_eq!(insns.len(), expected.len());
-        for (insn, expected) in insns.iter().zip(expected) {
-            assert_eq!(insn.text, expected);
-        }
+        let insns = Obj::from_bytes(Gen::call(-5).as_slice()).insns();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].text, "callq  0x0");
     }
 
     #[test]
@@ -987,6 +969,50 @@ mod tests {
             for (insn, expected) in insns.iter().zip(expected) {
                 assert_eq!(insn.text, expected);
             }
+        }
+    }
+
+    #[test]
+    fn jump_indirect() {
+        let mut bytes = Vec::<u8>::new();
+        let mut expected = Vec::new();
+        for &(target, target_str) in &[
+            (IndirectJumpTarget::Reg(R64::Rax), "%rax"),
+            (IndirectJumpTarget::Reg(R64::R9), "%r9"),
+            (IndirectJumpTarget::Mem(Mem::RipRel(0x42)), "0x42(%rip)"),
+            (IndirectJumpTarget::Mem(
+                Mem::base(R64::Rbx).index_scale(R64::Rdx, 2).disp(0x42)),
+             "0x42(%rbx,%rdx,2)"),
+        ] {
+            bytes.extend_from_slice(Gen::jump_indirect(target).as_slice());
+            expected.push(format!("jmpq   *{}", target_str));
+        }
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), expected.len());
+        for (insn, expected) in insns.iter().zip(expected) {
+            assert_eq!(insn.text, expected);
+        }
+    }
+
+    #[test]
+    fn call_indirect() {
+        let mut bytes = Vec::<u8>::new();
+        let mut expected = Vec::new();
+        for &(target, target_str) in &[
+            (IndirectJumpTarget::Reg(R64::Rax), "%rax"),
+            (IndirectJumpTarget::Reg(R64::R9), "%r9"),
+            (IndirectJumpTarget::Mem(Mem::RipRel(0x42)), "0x42(%rip)"),
+            (IndirectJumpTarget::Mem(
+                Mem::base(R64::Rbx).index_scale(R64::Rdx, 2).disp(0x42)),
+             "0x42(%rbx,%rdx,2)"),
+        ] {
+            bytes.extend_from_slice(Gen::call_indirect(target).as_slice());
+            expected.push(format!("callq  *{}", target_str));
+        }
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), expected.len());
+        for (insn, expected) in insns.iter().zip(expected) {
+            assert_eq!(insn.text, expected);
         }
     }
 }
