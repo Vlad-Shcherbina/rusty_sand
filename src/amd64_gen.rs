@@ -750,6 +750,22 @@ impl Gen {
     }
 }
 
+impl Gen {
+    pub fn ret() -> Gen {
+        let mut gen = Gen::default();
+        gen.write_u8(0xc3);
+        gen
+    }
+
+    pub fn retn(n: u16) -> Gen {
+        let mut gen = Gen::default();
+        gen.buf[0] = 0xc2;
+        gen.buf[1..3].copy_from_slice(&n.to_le_bytes());
+        gen.buf_len = 3;
+        gen
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1014,5 +1030,16 @@ mod tests {
         for (insn, expected) in insns.iter().zip(expected) {
             assert_eq!(insn.text, expected);
         }
+    }
+
+    #[test]
+    fn ret() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(Gen::ret().as_slice());
+        bytes.extend_from_slice(Gen::retn(0x9999).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), 2);
+        assert_eq!(insns[0].text, "retq");
+        assert_eq!(insns[1].text, "retq   $0x9999");
     }
 }
