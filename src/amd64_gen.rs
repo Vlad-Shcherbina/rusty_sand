@@ -419,18 +419,6 @@ impl RmEncoding {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum Binop {
-    Add = 0,
-    Or,
-    Adc,
-    Sbb,
-    And,
-    Sub,
-    Xor,
-    Cmp,
-}
-
 #[derive(Default, Debug)]
 pub struct Gen {
     buf: [u8; 15],
@@ -451,7 +439,21 @@ impl Gen {
     pub fn as_slice(&self) -> &[u8] {
         &self.buf[0..self.buf_len]
     }
+}
 
+#[derive(Clone, Copy, Debug)]
+pub enum Binop {
+    Add = 0,
+    Or,
+    Adc,
+    Sbb,
+    And,
+    Sub,
+    Xor,
+    Cmp,
+}
+
+impl Gen {
     pub fn binop(op: Binop, dst: impl Into<Operand>, src: impl Into<Operand>) -> Gen {
         let src: Operand = src.into();
         let dst: Operand = dst.into();
@@ -559,6 +561,77 @@ impl Gen {
         gen.write_slice(&enc.buf[..enc.buf_len]);
         gen.write_slice(imm_slice);
 
+        gen
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Cond {
+    O = 0,
+    No,
+    B,
+    Ae,
+    E,
+    Ne,
+    Be,
+    A,
+    S,
+    Ns,
+    P,
+    Np,
+    L,
+    Ge,
+    Le,
+    G,
+}
+
+impl Cond {
+    pub fn all() -> impl Iterator<Item=Cond> {
+        (0..16).map(|i| i.try_into().unwrap())
+    }
+}
+
+impl TryFrom<u8> for Cond {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => Cond::O,
+            1 => Cond::No,
+            2 => Cond::B,
+            3 => Cond::Ae,
+            4 => Cond::E,
+            5 => Cond::Ne,
+            6 => Cond::Be,
+            7 => Cond::A,
+            8 => Cond::S,
+            9 => Cond::Ns,
+            10 => Cond::P,
+            11 => Cond::Np,
+            12 => Cond::L,
+            13 => Cond::Ge,
+            14 => Cond::Le,
+            15 => Cond::G,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl Gen {
+    pub fn jump_cond(cond: Cond, rel: i32) -> Gen {
+        let mut gen = Gen::default();
+        match i8::try_from(rel) {
+            Ok(rel) => {
+                gen.buf[0] = 0x70 | cond as u8;
+                gen.buf[1] = rel as u8;
+                gen.buf_len = 2;
+            }
+            Err(_) => {
+                gen.buf[0] = 0x0f;
+                gen.buf[1] = 0x80 | cond as u8;
+                gen.buf[2..6].copy_from_slice(&rel.to_le_bytes());
+                gen.buf_len = 6;
+            }
+        }
         gen
     }
 }
@@ -739,6 +812,25 @@ mod tests {
                 bytes.extend_from_slice(
                     Gen::binop(Binop::Add, Mem::new(base).index_scale(index, 4).disp(0x42), R32::Eax).as_slice());
                 expected.push(format!("add    %eax,0x42(%{},%{},4)", base, index));
+            }
+            let insns = Obj::from_bytes(&bytes).insns();
+            assert_eq!(insns.len(), expected.len());
+            for (insn, expected) in insns.iter().zip(expected) {
+                assert_eq!(insn.text, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn jump_cond() {
+        for &rel in &[-1, 1000] {
+            let mut bytes = Vec::<u8>::new();
+            let mut expected = Vec::new();
+            for cond in Cond::all() {
+                bytes.extend_from_slice(Gen::jump_cond(cond, rel).as_slice());
+                let mut c = format!("{:?}", cond);
+                c.make_ascii_lowercase();
+                expected.push(format!("j{:<2}    0x{:x}", c, bytes.len() as i32 + rel));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
