@@ -508,6 +508,23 @@ impl Gen {
                 imm32 = (i32::try_from(imm).unwrap() as u32).to_le_bytes();
                 imm_slice = &imm32;
             }
+            (_, Operand::Mem(_)) |
+            (_, Operand::RipRel(_)) => {
+                reg = match dst {
+                    Operand::R8(dst) => dst as u8,
+                    Operand::R16(dst) => dst as u8,
+                    Operand::R32(dst) => dst as u8,
+                    Operand::R64(dst) => dst as u8,
+                    _ => panic!("{:?}", dst)
+                };
+                rm = src;
+                opcode = match size_bits {
+                    8 => op as u8 * 8 + 2,
+                    16 | 32 | 64 => op as u8 * 8 + 3,
+                    _ => unreachable!(),
+                };
+                imm_slice = &[];
+            }
             _ => {
                 reg = match src {
                     Operand::R8(src) => src as u8,
@@ -674,6 +691,25 @@ mod tests {
         assert_eq!(insns[1].text, "adc    %dx,0x42(%rip)");
         assert_eq!(insns[2].text, "adc    %edx,0x42(%rip)");
         assert_eq!(insns[3].text, "adc    %rdx,0x42(%rip)");
+    }
+
+    #[test]
+    fn binop_directions() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(
+            Gen::binop(Binop::Add, Mem::new(R64::Rcx), R8::Dl).as_slice());
+        bytes.extend_from_slice(
+            Gen::binop(Binop::Add, R8::Dl, Mem::new(R64::Rcx)).as_slice());
+        bytes.extend_from_slice(
+            Gen::binop(Binop::Add, Mem::new(R64::Rcx), R32::Edx).as_slice());
+        bytes.extend_from_slice(
+            Gen::binop(Binop::Add, R32::Edx, Mem::new(R64::Rcx)).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), 4);
+        assert_eq!(insns[0].text, "add    %dl,0x0(%rcx)");
+        assert_eq!(insns[1].text, "add    0x0(%rcx),%dl");
+        assert_eq!(insns[2].text, "add    %edx,0x0(%rcx)");
+        assert_eq!(insns[3].text, "add    0x0(%rcx),%edx");
     }
 
     #[test]
