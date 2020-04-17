@@ -232,15 +232,18 @@ impl TryFrom<u8> for R64 {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Mem {
-    base: R64,
-    index_scale: Option<(R64, u8)>,
-    disp: i32,
+pub enum Mem {
+    RipRel(i32),
+    Sib {
+        base: R64,
+        index_scale: Option<(R64, u8)>,
+        disp: i32,
+    }
 }
 
 impl Mem {
-    pub fn new(base: R64) -> Mem {
-        Mem {
+    pub fn base(base: R64) -> Mem {
+        Mem::Sib {
             base,
             index_scale: None,
             disp: 0,
@@ -248,19 +251,31 @@ impl Mem {
     }
 
     pub fn index_scale(self, index: R64, scale: u8) -> Mem {
-        assert!(self.index_scale.is_none());
         assert!(scale == 1 || scale == 2 || scale == 4 || scale == 8);
-        Mem {
-            index_scale: Some((index, scale)),
-            ..self
+        match self {
+            Mem::RipRel(_) => panic!(),
+            Mem::Sib { base, index_scale, disp } => {
+                assert!(index_scale.is_none());
+                Mem::Sib {
+                    base,
+                    index_scale: Some((index, scale)),
+                    disp
+                }
+            }
         }
     }
 
-    pub fn disp(self, disp: i32) -> Mem {
-        assert_eq!(self.disp, 0);
-        Mem {
-            disp,
-            ..self
+    pub fn disp(self, new_disp: i32) -> Mem {
+        match self {
+            Mem::RipRel(_) => panic!(),
+            Mem::Sib { base, index_scale, disp } => {
+                assert_eq!(disp, 0);
+                Mem::Sib {
+                    base,
+                    index_scale,
+                    disp: new_disp,
+                }
+            }
         }
     }
 }
@@ -271,7 +286,6 @@ pub enum Operand {
     R16(R16),
     R32(R32),
     R64(R64),
-    RipRel(i32),
     Mem(Mem),
     Imm8(i8),
     Imm16(i16),
@@ -286,7 +300,6 @@ impl Operand {
             Operand::R16(_) => Some(16),
             Operand::R32(_) => Some(32),
             Operand::R64(_) => Some(64),
-            Operand::RipRel(_) => None,
             Operand::Mem(_) => None,
             Operand::Imm8(_) => Some(8),
             Operand::Imm16(_) => Some(16),
@@ -356,7 +369,7 @@ impl RmEncoding {
             Operand::R16(r) => Self::from_reg(r as u8),
             Operand::R32(r) => Self::from_reg(r as u8),
             Operand::R64(r) => Self::from_reg(r as u8),
-            Operand::RipRel(disp) => {
+            Operand::Mem(Mem::RipRel(disp)) => {
                 let mut buf = [0; 5];
                 buf[..4].copy_from_slice(&disp.to_le_bytes());
                 Self {
@@ -366,25 +379,25 @@ impl RmEncoding {
                     buf_len: 4,
                 }
             }
-            Operand::Mem(mem) => {
-                match mem.index_scale {
-                    None => if mem.base as u8 & 7 != 4 {
+            Operand::Mem(Mem::Sib { base, index_scale, disp }) => {
+                match index_scale {
+                    None => if base as u8 & 7 != 4 {
                         let mut buf = [0; 5];
                         // TODO: use disp8 and no disp forms when appropriate
-                        buf[..4].copy_from_slice(&mem.disp.to_le_bytes());
+                        buf[..4].copy_from_slice(&disp.to_le_bytes());
                         Self {
-                            rex_rxb: mem.base as u8 >> 3,
-                            modrm: 0b10_000_000 | (mem.base as u8 & 7),
+                            rex_rxb: base as u8 >> 3,
+                            modrm: 0b10_000_000 | (base as u8 & 7),
                             buf,
                             buf_len: 4,
                         }
                     } else {
                         let sib = 0b00_100_100;
                         let mut buf = [sib, 0, 0, 0, 0];
-                        buf[1..].copy_from_slice(&mem.disp.to_le_bytes());
+                        buf[1..].copy_from_slice(&disp.to_le_bytes());
                         // TODO: use disp8 and no disp forms when appropriate
                         Self {
-                            rex_rxb: mem.base as u8 >> 3,
+                            rex_rxb: base as u8 >> 3,
                             modrm: 0b10_000_100,
                             buf,
                             buf_len: 5,
@@ -401,12 +414,12 @@ impl RmEncoding {
                         };
                         let sib = (scale << 6)
                             | ((index as u8 & 7) << 3)
-                            | (mem.base as u8 & 7);
+                            | (base as u8 & 7);
                         let mut buf = [sib, 0, 0, 0, 0];
                         // TODO: use disp8 and no disp forms when appropriate
-                        buf[1..].copy_from_slice(&mem.disp.to_le_bytes());
+                        buf[1..].copy_from_slice(&disp.to_le_bytes());
                         Self {
-                            rex_rxb: (mem.base as u8 >> 3) | (index as u8 >> 3 << 1),
+                            rex_rxb: (base as u8 >> 3) | (index as u8 >> 3 << 1),
                             modrm: 0b10_000_100,
                             buf,
                             buf_len: 5,
@@ -510,8 +523,7 @@ impl Gen {
                 imm32 = (i32::try_from(imm).unwrap() as u32).to_le_bytes();
                 imm_slice = &imm32;
             }
-            (_, Operand::Mem(_)) |
-            (_, Operand::RipRel(_)) => {
+            (_, Operand::Mem(_)) => {
                 reg = match dst {
                     Operand::R8(dst) => dst as u8,
                     Operand::R16(dst) => dst as u8,
@@ -751,13 +763,13 @@ mod tests {
     fn binop_rip_rel() {
         let mut bytes = Vec::<u8>::new();
         bytes.extend_from_slice(
-            Gen::binop(Binop::Adc, Operand::RipRel(0x42), R8::Dl).as_slice());
+            Gen::binop(Binop::Adc, Mem::RipRel(0x42), R8::Dl).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Adc, Operand::RipRel(0x42), R16::Dx).as_slice());
+            Gen::binop(Binop::Adc, Mem::RipRel(0x42), R16::Dx).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Adc, Operand::RipRel(0x42), R32::Edx).as_slice());
+            Gen::binop(Binop::Adc, Mem::RipRel(0x42), R32::Edx).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Adc, Operand::RipRel(0x42), R64::Rdx).as_slice());
+            Gen::binop(Binop::Adc, Mem::RipRel(0x42), R64::Rdx).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 4);
         assert_eq!(insns[0].text, "adc    %dl,0x42(%rip)");
@@ -770,13 +782,13 @@ mod tests {
     fn binop_directions() {
         let mut bytes = Vec::<u8>::new();
         bytes.extend_from_slice(
-            Gen::binop(Binop::Add, Mem::new(R64::Rcx), R8::Dl).as_slice());
+            Gen::binop(Binop::Add, Mem::base(R64::Rcx), R8::Dl).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Add, R8::Dl, Mem::new(R64::Rcx)).as_slice());
+            Gen::binop(Binop::Add, R8::Dl, Mem::base(R64::Rcx)).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Add, Mem::new(R64::Rcx), R32::Edx).as_slice());
+            Gen::binop(Binop::Add, Mem::base(R64::Rcx), R32::Edx).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Add, R32::Edx, Mem::new(R64::Rcx)).as_slice());
+            Gen::binop(Binop::Add, R32::Edx, Mem::base(R64::Rcx)).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 4);
         assert_eq!(insns[0].text, "add    %dl,0x0(%rcx)");
@@ -790,7 +802,7 @@ mod tests {
         let mut bytes = Vec::<u8>::new();
         let mut expected = Vec::new();
         for r in R64::all() {
-            bytes.extend_from_slice(Gen::binop(Binop::Add, Mem::new(r), R32::Eax).as_slice());
+            bytes.extend_from_slice(Gen::binop(Binop::Add, Mem::base(r), R32::Eax).as_slice());
             expected.push(format!("add    %eax,0x0(%{})", r));
         }
         let insns = Obj::from_bytes(&bytes).insns();
@@ -810,7 +822,7 @@ mod tests {
                     continue;
                 }
                 bytes.extend_from_slice(
-                    Gen::binop(Binop::Add, Mem::new(base).index_scale(index, 4).disp(0x42), R32::Eax).as_slice());
+                    Gen::binop(Binop::Add, Mem::base(base).index_scale(index, 4).disp(0x42), R32::Eax).as_slice());
                 expected.push(format!("add    %eax,0x42(%{},%{},4)", base, index));
             }
             let insns = Obj::from_bytes(&bytes).insns();
