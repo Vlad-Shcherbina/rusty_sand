@@ -232,7 +232,7 @@ impl TryFrom<u8> for R64 {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum Mem {
+pub enum Addr {
     RipRel(i32),
     Sib {
         base: R64,
@@ -241,41 +241,71 @@ pub enum Mem {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Mem {
+    addr: Addr,
+    size: Option<u8>,
+}
+
 impl Mem {
+    pub fn rip_rel(disp: i32) -> Mem {
+        Mem {
+            addr: Addr::RipRel(disp),
+            size: None
+        }
+    }
+
     pub fn base(base: R64) -> Mem {
-        Mem::Sib {
-            base,
-            index_scale: None,
-            disp: 0,
+        Mem {
+            addr: Addr::Sib {
+                base,
+                index_scale: None,
+                disp: 0,
+            },
+            size: None,
         }
     }
 
     pub fn index_scale(self, index: R64, scale: u8) -> Mem {
         assert!(scale == 1 || scale == 2 || scale == 4 || scale == 8);
-        match self {
-            Mem::RipRel(_) => panic!(),
-            Mem::Sib { base, index_scale, disp } => {
+        match self.addr {
+            Addr::RipRel(_) => panic!(),
+            Addr::Sib { base, index_scale, disp } => {
                 assert!(index_scale.is_none());
-                Mem::Sib {
-                    base,
-                    index_scale: Some((index, scale)),
-                    disp
+                Mem {
+                    addr: Addr::Sib {
+                        base,
+                        index_scale: Some((index, scale)),
+                        disp
+                    },
+                    size: self.size,
                 }
             }
         }
     }
 
     pub fn disp(self, new_disp: i32) -> Mem {
-        match self {
-            Mem::RipRel(_) => panic!(),
-            Mem::Sib { base, index_scale, disp } => {
+        match self.addr {
+            Addr::RipRel(_) => panic!(),
+            Addr::Sib { base, index_scale, disp } => {
                 assert_eq!(disp, 0);
-                Mem::Sib {
-                    base,
-                    index_scale,
-                    disp: new_disp,
+                Mem {
+                    addr: Addr::Sib {
+                        base,
+                        index_scale,
+                        disp: new_disp,
+                    },
+                    size: self.size,
                 }
             }
+        }
+    }
+
+    pub fn size(self, size: u8) -> Mem {
+        assert!(self.size.is_none());
+        Mem {
+            addr: self.addr,
+            size: Some(size),
         }
     }
 }
@@ -300,7 +330,7 @@ impl Operand {
             Operand::R16(_) => Some(16),
             Operand::R32(_) => Some(32),
             Operand::R64(_) => Some(64),
-            Operand::Mem(_) => None,
+            Operand::Mem(Mem { size, .. }) => *size,
             Operand::Imm8(_) => Some(8),
             Operand::Imm16(_) => Some(16),
             Operand::Imm32(_) => Some(32),
@@ -375,8 +405,8 @@ impl RmEncoding {
     }
 
     fn from_mem(mem: Mem) -> Self {
-        match mem {
-            Mem::RipRel(disp) => {
+        match mem.addr {
+            Addr::RipRel(disp) => {
                 let mut buf = [0; 5];
                 buf[..4].copy_from_slice(&disp.to_le_bytes());
                 Self {
@@ -386,7 +416,7 @@ impl RmEncoding {
                     buf_len: 4,
                 }
             }
-            Mem::Sib { base, index_scale, disp } => {
+            Addr::Sib { base, index_scale, disp } => {
                 match index_scale {
                     None => if base as u8 & 7 != 4 {
                         let mut buf = [0; 5];
@@ -722,7 +752,10 @@ impl Gen {
         let mut gen = Gen::default();
         let enc = match target {
             IndirectJumpTarget::Reg(r) => RmEncoding::from_reg(r as u8),
-            IndirectJumpTarget::Mem(m) => RmEncoding::from_mem(m),
+            IndirectJumpTarget::Mem(m) => {
+                assert!(m.size.is_none() || m.size == Some(64));
+                RmEncoding::from_mem(m)
+            }
         };
         if enc.rex_rxb != 0 {
             gen.write_u8(enc.rex_rxb | 0x40)
@@ -738,7 +771,10 @@ impl Gen {
         let mut gen = Gen::default();
         let enc = match target {
             IndirectJumpTarget::Reg(r) => RmEncoding::from_reg(r as u8),
-            IndirectJumpTarget::Mem(m) => RmEncoding::from_mem(m),
+            IndirectJumpTarget::Mem(m) => {
+                assert!(m.size.is_none() || m.size == Some(64));
+                RmEncoding::from_mem(m)
+            }
         };
         if enc.rex_rxb != 0 {
             gen.write_u8(enc.rex_rxb | 0x40)
@@ -881,13 +917,13 @@ mod tests {
     fn binop_rip_rel() {
         let mut bytes = Vec::<u8>::new();
         bytes.extend_from_slice(
-            Gen::binop(Binop::Adc, Mem::RipRel(0x42), R8::Dl).as_slice());
+            Gen::binop(Binop::Adc, Mem::rip_rel(0x42), R8::Dl).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Adc, Mem::RipRel(0x42), R16::Dx).as_slice());
+            Gen::binop(Binop::Adc, Mem::rip_rel(0x42), R16::Dx).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Adc, Mem::RipRel(0x42), R32::Edx).as_slice());
+            Gen::binop(Binop::Adc, Mem::rip_rel(0x42), R32::Edx).as_slice());
         bytes.extend_from_slice(
-            Gen::binop(Binop::Adc, Mem::RipRel(0x42), R64::Rdx).as_slice());
+            Gen::binop(Binop::Adc, Mem::rip_rel(0x42), R64::Rdx).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 4);
         assert_eq!(insns[0].text, "adc    %dl,0x42(%rip)");
@@ -995,7 +1031,7 @@ mod tests {
         for &(target, target_str) in &[
             (IndirectJumpTarget::Reg(R64::Rax), "%rax"),
             (IndirectJumpTarget::Reg(R64::R9), "%r9"),
-            (IndirectJumpTarget::Mem(Mem::RipRel(0x42)), "0x42(%rip)"),
+            (IndirectJumpTarget::Mem(Mem::rip_rel(0x42)), "0x42(%rip)"),
             (IndirectJumpTarget::Mem(
                 Mem::base(R64::Rbx).index_scale(R64::Rdx, 2).disp(0x42)),
              "0x42(%rbx,%rdx,2)"),
@@ -1017,7 +1053,7 @@ mod tests {
         for &(target, target_str) in &[
             (IndirectJumpTarget::Reg(R64::Rax), "%rax"),
             (IndirectJumpTarget::Reg(R64::R9), "%r9"),
-            (IndirectJumpTarget::Mem(Mem::RipRel(0x42)), "0x42(%rip)"),
+            (IndirectJumpTarget::Mem(Mem::rip_rel(0x42)), "0x42(%rip)"),
             (IndirectJumpTarget::Mem(
                 Mem::base(R64::Rbx).index_scale(R64::Rdx, 2).disp(0x42)),
              "0x42(%rbx,%rdx,2)"),
