@@ -613,6 +613,38 @@ impl Gen {
     }
 }
 
+impl Gen {
+    pub fn push(op: impl Into<Operand>) -> Gen {
+        let op: Operand = op.into();
+        let mut gen = Gen::default();
+        let size_bits = op.size_bits().unwrap();
+        assert!(size_bits == 16 || size_bits == 64);
+        if size_bits == 16 {
+            gen.write_u8(0x66);
+        }
+        let enc = match op {
+            // TODO: short forms for 'push r16', 'push r64'
+            Operand::R16(r) => RmEncoding::from_reg(r as u8),
+            Operand::R32(_) => panic!(),
+            Operand::R64(r) => RmEncoding::from_reg(r as u8),
+            Operand::Mem(m) => RmEncoding::from_mem(m),
+            Operand::Imm16(_) => todo!(),
+            Operand::Imm64(_) => todo!(),
+            _ => panic!(),
+        };
+        let rex = enc.rex_rxb;
+        // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
+        // no need to set it
+        if rex != 0 {
+            gen.write_u8(0x40 | rex);
+        }
+        gen.write_u8(0xff);
+        gen.write_u8(enc.modrm | (6 << 3));
+        gen.write_slice(&enc.buf[..enc.buf_len]);
+        gen
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum RelJumpTarget {
     Rel8(i8),
@@ -985,6 +1017,25 @@ mod tests {
                 assert_eq!(insn.text, expected);
             }
         }
+    }
+
+    #[test]
+    fn push() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(Gen::push(R16::Bx).as_slice());
+        bytes.extend_from_slice(Gen::push(R16::R9w).as_slice());
+        bytes.extend_from_slice(Gen::push(Mem::base(R64::Rax).size(16)).as_slice());
+        bytes.extend_from_slice(Gen::push(R64::Rbx).as_slice());
+        bytes.extend_from_slice(Gen::push(R64::R9).as_slice());
+        bytes.extend_from_slice(Gen::push(Mem::base(R64::Rax).size(64)).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), 6);
+        assert_eq!(insns[0].text, "push   %bx");
+        assert_eq!(insns[1].text, "push   %r9w");
+        assert_eq!(insns[2].text, "pushw  0x0(%rax)");
+        assert_eq!(insns[3].text, "push   %rbx");
+        assert_eq!(insns[4].text, "push   %r9");
+        assert_eq!(insns[5].text, "pushq  0x0(%rax)");
     }
 
     #[test]
