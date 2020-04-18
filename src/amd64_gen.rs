@@ -657,24 +657,6 @@ impl Gen {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum IndirectJumpTarget {
-    Reg(R64),
-    Mem(Mem),
-}
-
-impl From<R64> for IndirectJumpTarget {
-    fn from(r: R64) -> Self {
-        Self::Reg(r)
-    }
-}
-
-impl From<Mem> for IndirectJumpTarget {
-    fn from(m: Mem) -> Self {
-        Self::Mem(m)
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
 pub enum Cond {
     O = 0,
     No,
@@ -743,6 +725,24 @@ impl Gen {
             }
         }
         gen
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum IndirectJumpTarget {
+    Reg(R64),
+    Mem(Mem),
+}
+
+impl From<R64> for IndirectJumpTarget {
+    fn from(r: R64) -> Self {
+        Self::Reg(r)
+    }
+}
+
+impl From<Mem> for IndirectJumpTarget {
+    fn from(m: Mem) -> Self {
+        Self::Mem(m)
     }
 }
 
