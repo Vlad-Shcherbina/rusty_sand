@@ -727,6 +727,45 @@ impl Gen {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum MulOp {
+    Mul = 4,
+    Imul = 5,
+    Div = 6,
+    Idiv = 7,
+}
+
+impl Gen {
+    pub fn mul_op(mul_op: MulOp, op: impl Into<Operand>) -> Gen {
+        let op: Operand = op.into();
+        let mut gen = Gen::default();
+        let size_bits = op.size_bits().unwrap();
+        if size_bits == 16 {
+            gen.write_u8(0x66);
+        }
+        let enc = RmEncoding::from_reg_or_mem(op);
+        let mut rex = enc.rex_rxb;
+        if size_bits == 64 {
+            rex |= 8;
+        }
+        if rex != 0 {
+            gen.write_u8(0x40 | rex);
+        }
+
+        let opcode = match size_bits {
+            8 => 0xf6,
+            16 | 32 | 64 => 0xf7,
+            _ => panic!("{}", size_bits),
+        };
+        gen.write_u8(opcode);
+
+        gen.write_u8(enc.modrm | ((mul_op as u8) << 3));
+
+        gen.write_slice(&enc.buf[..enc.buf_len]);
+        gen
+    }
+}
+
 impl Gen {
     pub fn push(op: impl Into<Operand>) -> Gen {
         let op: Operand = op.into();
@@ -1215,6 +1254,21 @@ mod tests {
         assert_eq!(insns[3].text, "mov    %dx,0x0(%rax)");
         assert_eq!(insns[4].text, "mov    %edx,0x0(%rax)");
         assert_eq!(insns[5].text, "mov    %rdx,0x0(%rax)");
+    }
+
+    #[test]
+    fn mul_div() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(Gen::mul_op(MulOp::Mul, R8::Cl).as_slice());
+        bytes.extend_from_slice(Gen::mul_op(MulOp::Imul, R16::Cx).as_slice());
+        bytes.extend_from_slice(Gen::mul_op(MulOp::Div, R32::Ecx).as_slice());
+        bytes.extend_from_slice(Gen::mul_op(MulOp::Idiv, R64::Rcx).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), 4);
+        assert_eq!(insns[0].text, "mul    %cl");
+        assert_eq!(insns[1].text, "imul   %cx");
+        assert_eq!(insns[2].text, "div    %ecx");
+        assert_eq!(insns[3].text, "idiv   %rcx");
     }
 
     #[test]
