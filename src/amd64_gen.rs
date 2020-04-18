@@ -614,6 +614,120 @@ impl Gen {
 }
 
 impl Gen {
+    pub fn mov(dst: impl Into<Operand>, src: impl Into<Operand>) -> Gen {
+        let src: Operand = src.into();
+        let dst: Operand = dst.into();
+
+        let size_bits = match (src.size_bits(), dst.size_bits()) {
+            (Some(s1), Some(s2)) => {
+                assert_eq!(s1, s2);
+                s1
+            },
+            (Some(s1), None) => s1,
+            (None, Some(s2)) => s2,
+            (None, None) => panic!("{:?} {:?}", src, dst),
+        };
+
+        let mut gen = Gen::default();
+        if size_bits == 16 {
+            gen.write_u8(0x66);
+        }
+
+        let imm8;
+        let imm16;
+        let imm32;
+        let imm_slice;
+
+        let reg;
+        let enc;
+        let opcode;
+        match (dst, src) {
+            // TODO: special encoding for
+            //   mov r8, imm8    (shorter)
+            //   mov r16, imm16  (shorter)
+            //   mov r32, imm32  (shorter)
+            //   mov r64, imm64  (actually allows imm64)
+            (dst, Operand::Imm8(imm)) => {
+                enc = RmEncoding::from_reg_or_mem(dst);
+                reg = 0;
+                opcode = 0xc6;
+                imm8 = imm as u8;
+                imm_slice = std::slice::from_ref(&imm8);
+            }
+            (dst, Operand::Imm16(imm)) => {
+                enc = RmEncoding::from_reg_or_mem(dst);
+                reg = 0;
+                opcode = 0xc7;
+                imm16 = (imm as u16).to_le_bytes();
+                imm_slice = &imm16;
+            }
+            (dst, Operand::Imm32(imm)) => {
+                enc = RmEncoding::from_reg_or_mem(dst);
+                reg = 0;
+                opcode = 0xc7;
+                imm32 = (imm as u32).to_le_bytes();
+                imm_slice = &imm32;
+            }
+            (dst, Operand::Imm64(imm)) => {
+                enc = RmEncoding::from_reg_or_mem(dst);
+                reg = 0;
+                opcode = 0xc7;
+                imm32 = (i32::try_from(imm).unwrap() as u32).to_le_bytes();
+                imm_slice = &imm32;
+            }
+            (_, Operand::Mem(src)) => {
+                reg = match dst {
+                    Operand::R8(dst) => dst as u8,
+                    Operand::R16(dst) => dst as u8,
+                    Operand::R32(dst) => dst as u8,
+                    Operand::R64(dst) => dst as u8,
+                    _ => panic!("{:?}", dst)
+                };
+                enc = RmEncoding::from_mem(src);
+                opcode = match size_bits {
+                    8 => 0x8a,
+                    16 | 32 | 64 => 0x8b,
+                    _ => unreachable!(),
+                };
+                imm_slice = &[];
+            }
+            _ => {
+                reg = match src {
+                    Operand::R8(src) => src as u8,
+                    Operand::R16(src) => src as u8,
+                    Operand::R32(src) => src as u8,
+                    Operand::R64(src) => src as u8,
+                    _ => panic!("{:?}", src)
+                };
+                enc = RmEncoding::from_reg_or_mem(dst);
+                opcode = match size_bits {
+                    8 => 0x88,
+                    16 | 32 | 64 => 0x89,
+                    _ => unreachable!(),
+                };
+                imm_slice = &[];
+            }
+        }
+        let mut rex = enc.rex_rxb | ((reg & 8) >> 1);
+        if size_bits == 64 {
+            rex |= 8;
+        }
+        if rex != 0 {
+            gen.write_u8(0x40 | rex);
+        }
+
+        gen.write_u8(opcode);
+
+        gen.write_u8(enc.modrm | ((reg & 7) << 3));
+
+        gen.write_slice(&enc.buf[..enc.buf_len]);
+        gen.write_slice(imm_slice);
+
+        gen
+    }
+}
+
+impl Gen {
     pub fn push(op: impl Into<Operand>) -> Gen {
         let op: Operand = op.into();
         let mut gen = Gen::default();
@@ -669,6 +783,7 @@ impl Gen {
             gen.write_u8(0x40 | rex);
         }
         gen.write_u8(0x8f);
+        #[allow(clippy::identity_op)]
         gen.write_u8(enc.modrm | (0 << 3));
         gen.write_slice(&enc.buf[..enc.buf_len]);
         gen
@@ -1047,6 +1162,59 @@ mod tests {
                 assert_eq!(insn.text, expected);
             }
         }
+    }
+
+    #[test]
+    fn mov_imm() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(Gen::mov(R8::Dl, 0x42i8).as_slice());
+        bytes.extend_from_slice(Gen::mov(R16::Dx, 0x42i16).as_slice());
+        bytes.extend_from_slice(Gen::mov(R32::Edx, 0x42i32).as_slice());
+        bytes.extend_from_slice(Gen::mov(R64::Rdx, 0x42i64).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), 4);
+        assert_eq!(insns[0].text, "mov    $0x42,%dl");
+        assert_eq!(insns[1].text, "mov    $0x42,%dx");
+        assert_eq!(insns[2].text, "mov    $0x42,%edx");
+        assert_eq!(insns[3].text, "mov    $0x42,%rdx");
+    }
+
+    #[test]
+    fn mov_to_reg_from_rm() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(Gen::mov(R8::Dl, R8::Al).as_slice());
+        bytes.extend_from_slice(Gen::mov(R16::Dx, R16::Ax).as_slice());
+        bytes.extend_from_slice(Gen::mov(R8::Dl, Mem::base(R64::Rax)).as_slice());
+        bytes.extend_from_slice(Gen::mov(R16::Dx, Mem::base(R64::Rax)).as_slice());
+        bytes.extend_from_slice(Gen::mov(R32::Edx, Mem::base(R64::Rax)).as_slice());
+        bytes.extend_from_slice(Gen::mov(R64::Rdx, Mem::base(R64::Rax)).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), 6);
+        assert_eq!(insns[0].text, "mov    %al,%dl");
+        assert_eq!(insns[1].text, "mov    %ax,%dx");
+        assert_eq!(insns[2].text, "mov    0x0(%rax),%dl");
+        assert_eq!(insns[3].text, "mov    0x0(%rax),%dx");
+        assert_eq!(insns[4].text, "mov    0x0(%rax),%edx");
+        assert_eq!(insns[5].text, "mov    0x0(%rax),%rdx");
+    }
+
+    #[test]
+    fn mov_to_rm_from_reg() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(Gen::mov(R8::Al, R8::Dl).as_slice());
+        bytes.extend_from_slice(Gen::mov(R16::Ax, R16::Dx).as_slice());
+        bytes.extend_from_slice(Gen::mov(Mem::base(R64::Rax), R8::Dl).as_slice());
+        bytes.extend_from_slice(Gen::mov(Mem::base(R64::Rax), R16::Dx).as_slice());
+        bytes.extend_from_slice(Gen::mov(Mem::base(R64::Rax), R32::Edx).as_slice());
+        bytes.extend_from_slice(Gen::mov(Mem::base(R64::Rax), R64::Rdx).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), 6);
+        assert_eq!(insns[0].text, "mov    %dl,%al");
+        assert_eq!(insns[1].text, "mov    %dx,%ax");
+        assert_eq!(insns[2].text, "mov    %dl,0x0(%rax)");
+        assert_eq!(insns[3].text, "mov    %dx,0x0(%rax)");
+        assert_eq!(insns[4].text, "mov    %edx,0x0(%rax)");
+        assert_eq!(insns[5].text, "mov    %rdx,0x0(%rax)");
     }
 
     #[test]
