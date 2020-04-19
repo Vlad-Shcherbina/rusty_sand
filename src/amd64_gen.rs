@@ -646,7 +646,6 @@ impl Gen {
             //   mov r8, imm8    (shorter)
             //   mov r16, imm16  (shorter)
             //   mov r32, imm32  (shorter)
-            //   mov r64, imm64  (actually allows imm64)
             (dst, Operand::Imm8(imm)) => {
                 enc = RmEncoding::from_reg_or_mem(dst);
                 reg = 0;
@@ -669,6 +668,13 @@ impl Gen {
                 imm_slice = &imm32;
             }
             (dst, Operand::Imm64(imm)) => {
+                if let (Operand::R64(dst), Err(_)) = (dst, i32::try_from(imm)) {
+                    let rex = 0x48 | (dst as u8 >> 3);
+                    gen.write_u8(rex);
+                    gen.write_u8(0xb8 | (dst as u8 & 7));
+                    gen.write_slice(&imm.to_le_bytes());
+                    return gen;
+                }
                 enc = RmEncoding::from_reg_or_mem(dst);
                 reg = 0;
                 opcode = 0xc7;
@@ -1210,12 +1216,16 @@ mod tests {
         bytes.extend_from_slice(Gen::mov(R16::Dx, 0x42i16).as_slice());
         bytes.extend_from_slice(Gen::mov(R32::Edx, 0x42i32).as_slice());
         bytes.extend_from_slice(Gen::mov(R64::Rdx, 0x42i64).as_slice());
+        bytes.extend_from_slice(Gen::mov(R64::Rdx, 0xaabbccddeei64).as_slice());
+        bytes.extend_from_slice(Gen::mov(R64::R11, 0xaabbccddeei64).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
-        assert_eq!(insns.len(), 4);
+        assert_eq!(insns.len(), 6);
         assert_eq!(insns[0].text, "mov    $0x42,%dl");
         assert_eq!(insns[1].text, "mov    $0x42,%dx");
         assert_eq!(insns[2].text, "mov    $0x42,%edx");
         assert_eq!(insns[3].text, "mov    $0x42,%rdx");
+        assert_eq!(insns[4].text, "movabs $0xaabbccddee,%rdx");
+        assert_eq!(insns[5].text, "movabs $0xaabbccddee,%r11");
     }
 
     #[test]
