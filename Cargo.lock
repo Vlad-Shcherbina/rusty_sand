@@ -90,6 +90,7 @@ name = "rusty_sand"
 version = "0.1.0"
 dependencies = [
  "tempfile",
+ "winapi",
 ]
 
 [[package]]

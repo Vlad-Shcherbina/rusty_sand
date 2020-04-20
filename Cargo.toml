@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 tempfile = "*"
+winapi = { version = "*", features = ["memoryapi", "sysinfoapi"] }
 
 [features]
 clippy = []  # https://github.com/rust-lang/cargo/issues/8075
