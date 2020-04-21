@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 use crate::exe_buf::ExeBuf;
 use crate::amd64_gen::{Gen, R32, R64, Binop};
+use crate::interp::opcodes;
 
 #[repr(C)]
 pub struct State {
@@ -27,7 +28,7 @@ impl State {
 }
 
 #[naked]
-pub unsafe fn jit_trampoline() {
+unsafe fn jit_trampoline() {
     asm!("
     // push all win64 volatile registers
     push rax
@@ -65,29 +66,28 @@ extern "win64" fn halt() {
 
 fn is_fallthrough(cmd: u32) -> bool {
     let op = cmd >> 28;
-    op != 7 &&  // halt
-    op != 12  // jump / load program
+    op != opcodes::HALT && op != opcodes::LOAD_PROGRAM
 }
 
 impl State {
     fn compile_insn(&mut self, pos: usize) {
         let insn = self.arrays[0][pos];
         let op = insn >> 28;
-        if op == 13 {
+        if op == opcodes::ORTHOGRAPHY {
             let a = ((insn >> 25) & 7) as usize;
             let imm = insn & ((1 << 25) - 1);
             self.exe_buf.push(Gen::mov(R32::try_from(8 + a as u8).unwrap(), imm as i32).as_slice());
             return;
         }
         match op {
-            7 => { // halt
+            opcodes::HALT => { // halt
                 let mut t = Vec::<u8>::new();
                 let volatile_regs = [R64::Rax, R64::Rcx, R64::Rdx, R64::R8, R64::R9, R64::R10, R64::R11];
                 for &r in &volatile_regs {
                     t.extend_from_slice(Gen::push(r).as_slice());
                 }
                 t.extend_from_slice(Gen::binop(Binop::Sub, R64::Rsp, 0x20i64).as_slice());
-                t.extend_from_slice(Gen::mov(R64::Rax, halt as i64).as_slice());
+                t.extend_from_slice(Gen::mov(R64::Rax, halt as usize as i64).as_slice());
                 t.extend_from_slice(Gen::call_indirect(R64::Rax).as_slice());
                 t.extend_from_slice(Gen::binop(Binop::Add, R64::Rsp, 0x20i64).as_slice());
                 for &r in volatile_regs.iter().rev() {
@@ -111,7 +111,7 @@ impl State {
         while is_fallthrough(self.arrays[0][end]) {
             end += 1;
         }
-        println!("State::compile({}..{})", finger, end);
+        println!("State::compile({}..={})", finger, end);
         for i in (finger..end + 1).rev() {
             self.compile_insn(i);
             self.jump_locations[finger as usize] = self.exe_buf.cur_pos();
@@ -164,7 +164,6 @@ impl State {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,14 +172,13 @@ mod tests {
     fn constant() {
         for reg in 0..8 {
             let mut s = State::new(vec![
-                (13 << 28) | (reg << 25) | 42,
-                7 << 28,
+                opcodes::ORTHOGRAPHY << 28 | reg << 25 | 42,
+                opcodes::HALT << 28,
             ]);
             s.run();
             let mut expected = [0; 8];
             expected[reg as usize] = 42;
             assert_eq!(s.regs, expected);
-            dbg!(s.regs);
         }
     }
 }

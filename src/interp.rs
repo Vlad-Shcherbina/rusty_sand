@@ -25,6 +25,23 @@ pub struct Machine {
     pub stats: Stats,
 }
 
+pub mod opcodes {
+    pub const CMOVE: u32 = 0;
+    pub const ARRAY_INDEX: u32 = 1;
+    pub const ARRAY_AMENDMENT: u32 = 2;
+    pub const ADDITION: u32 = 3;
+    pub const MULTIPLICATION: u32 = 4;
+    pub const DIVISION: u32 = 5;
+    pub const NOT_AND: u32 = 6;
+    pub const HALT: u32 = 7;
+    pub const ALLOCATION: u32 = 8;
+    pub const ABANDONMENT: u32 = 9;
+    pub const OUTPUT: u32 = 10;
+    pub const INPUT: u32 = 11;
+    pub const LOAD_PROGRAM: u32 = 12;
+    pub const ORTHOGRAPHY: u32 = 13;
+}
+
 impl Machine {
     pub fn new(prog: &[u32]) -> Self {
         Self {
@@ -51,7 +68,7 @@ impl Machine {
             self.stats.ops[op as usize] += 1;
             let regs = &mut self.regs;
 
-            if op == 13 {
+            if op == opcodes::ORTHOGRAPHY {
                 let a = ((cur >> 25) & 7) as usize;
                 regs[a] = cur & ((1 << 25) - 1);
                 continue;
@@ -61,9 +78,11 @@ impl Machine {
             let b = ((cur >> 3) & 7) as usize;
             let c = (cur & 7) as usize;
             match op {
-                0 => if regs[c] != 0 { regs[a] = regs[b]; }
-                1 => regs[a] = self.arrays[regs[b] as usize][regs[c] as usize],
-                2 => {
+                opcodes::CMOVE =>
+                    if regs[c] != 0 { regs[a] = regs[b]; }
+                opcodes::ARRAY_INDEX =>
+                    regs[a] = self.arrays[regs[b] as usize][regs[c] as usize],
+                opcodes::ARRAY_AMENDMENT => {
                     if regs[a] == 0 {
                         if self.stats.word_states[regs[b] as usize] == WordState::Executed {
                             self.stats.num_modify_executed += 1;
@@ -72,12 +91,12 @@ impl Machine {
                     }
                     self.arrays[regs[a] as usize][regs[b] as usize] = regs[c];
                 }
-                3 => regs[a] = regs[b].wrapping_add(regs[c]),
-                4 => regs[a] = regs[b].wrapping_mul(regs[c]),
-                5 => regs[a] = regs[b] / regs[c],
-                6 => regs[a] = !(regs[b] & regs[c]),
-                7 => break,
-                8 => {
+                opcodes::ADDITION => regs[a] = regs[b].wrapping_add(regs[c]),
+                opcodes::MULTIPLICATION => regs[a] = regs[b].wrapping_mul(regs[c]),
+                opcodes::DIVISION => regs[a] = regs[b] / regs[c],
+                opcodes::NOT_AND => regs[a] = !(regs[b] & regs[c]),
+                opcodes::HALT => break,
+                opcodes::ALLOCATION => {
                     let arr = vec![0; regs[c] as usize];
                     let idx = match self.free.pop() {
                         Some(i) => {
@@ -93,15 +112,15 @@ impl Machine {
                     assert!(idx != 0);
                     regs[b] = idx;
                 }
-                9 => {
+                opcodes::ABANDONMENT => {
                     self.arrays[regs[c] as usize] = vec![];
                     self.free.push(regs[c]);
                 }
-                10 => {
+                opcodes::OUTPUT => {
                     print!("{}", u8::try_from(regs[c]).unwrap() as char);
                     std::io::stdout().flush().unwrap();
                 }
-                11 => {
+                opcodes::INPUT => {
                     let mut ch = 0u8;
                     match std::io::stdin().read_exact(std::slice::from_mut(&mut ch)) {
                         Ok(()) => regs[c] = ch as u32,
@@ -112,7 +131,7 @@ impl Machine {
                         }
                     }
                 }
-                12 => {
+                opcodes::LOAD_PROGRAM => {
                     if regs[b] != 0 {
                         self.arrays[0] = self.arrays[regs[b] as usize].clone();
                         self.stats.word_states = vec![WordState::Initial; self.arrays[0].len()];
@@ -120,10 +139,7 @@ impl Machine {
                     }
                     self.finger = regs[c];
                 }
-                13 => {
-                    let a = ((cur >> 25) & 7) as usize;
-                    regs[a] = cur & ((1 << 25) - 1);
-                }
+                opcodes::ORTHOGRAPHY => unreachable!(),
                 _ => panic!("{}", op),
             }
         }
