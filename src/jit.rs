@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use crate::exe_buf::ExeBuf;
-use crate::amd64_gen::{Gen, R32, R64, Binop, Mem};
+use crate::amd64_gen::{Gen, R32, R64, Binop, Mem, Cond};
 use crate::interp::opcodes;
 
 #[repr(C)]
@@ -64,6 +64,28 @@ extern "win64" fn halt() {
     println!("halt");
 }
 
+extern "win64" fn fail(s: *const std::os::raw::c_char) {
+    let s = unsafe { std::ffi::CStr::from_ptr(s) };
+    println!("fail: {}", s.to_str().unwrap());
+    unsafe {
+        asm!("int3");
+    }
+    std::process::exit(1);
+}
+
+fn fail_code(s: &'static str) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(50);
+    buf.extend_from_slice(Gen::mov(R64::Rcx, s.as_ptr() as usize as i64).as_slice());
+    buf.extend_from_slice(Gen::mov(R64::Rax, fail as usize as i64).as_slice());
+
+    // ensure 16-byte stack alignment
+    buf.extend_from_slice(Gen::binop(Binop::And, R64::Rsp, -16i64).as_slice());
+    buf.extend_from_slice(Gen::binop(Binop::Sub, R64::Rsp, 0x80i64).as_slice());
+
+    buf.extend_from_slice(Gen::call_indirect(R64::Rax).as_slice());
+    buf
+}
+
 fn is_fallthrough(cmd: u32) -> bool {
     let op = cmd >> 28;
     op != opcodes::HALT && op != opcodes::LOAD_PROGRAM
@@ -80,7 +102,7 @@ impl State {
             return;
         }
         let _a = ((insn >> 6) & 7) as usize;
-        let _b = ((insn >> 3) & 7) as usize;
+        let b = ((insn >> 3) & 7) as usize;
         let c = (insn & 7) as usize;
         match op {
             opcodes::HALT => { // halt
@@ -112,8 +134,24 @@ impl State {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
                 let c = R64::try_from(8 + c as u8).unwrap();
+                let b = R64::try_from(8 + b as u8).unwrap();
+
                 self.exe_buf.push(Gen::jump_indirect(Mem::base(R64::Rsi).index_scale(c, 8)).as_slice());
                 self.exe_buf.push(Gen::mov(R64::Rax, c).as_slice());
+
+                let no_fail = self.exe_buf.cur_pos();
+                self.exe_buf.push(fail_code("LOAD_PROGRAM: c >= arrays[0].len()\0").as_slice());
+                self.exe_buf.push(Gen::jump_cond(Cond::B,
+                    i32::try_from(no_fail as usize - self.exe_buf.cur_pos() as usize).unwrap(),
+                ).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Cmp, c, R64::Rdi).as_slice());
+
+                let no_fail = self.exe_buf.cur_pos();
+                self.exe_buf.push(fail_code("LOAD_PROGRAM: b != 0\0").as_slice());
+                self.exe_buf.push(Gen::jump_cond(Cond::E,
+                    i32::try_from(no_fail as usize - self.exe_buf.cur_pos() as usize).unwrap(),
+                ).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Cmp, b, 0i64).as_slice());
             }
             _ => todo!("op: {}", op),
         }
