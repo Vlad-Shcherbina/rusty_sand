@@ -101,11 +101,22 @@ impl State {
             self.exe_buf.push(Gen::mov(R32::try_from(8 + a as u8).unwrap(), imm as i32).as_slice());
             return;
         }
-        let _a = ((insn >> 6) & 7) as usize;
+        let a = ((insn >> 6) & 7) as usize;
         let b = ((insn >> 3) & 7) as usize;
         let c = (insn & 7) as usize;
         match op {
-            opcodes::HALT => { // halt
+            opcodes::CMOVE => {
+                let a = R32::try_from(8 + a as u8).unwrap();
+                let b = R32::try_from(8 + b as u8).unwrap();
+                let c = R32::try_from(8 + c as u8).unwrap();
+                let skip = self.exe_buf.cur_pos();
+                self.exe_buf.push(Gen::mov(a, b).as_slice());
+                self.exe_buf.push(Gen::jump_cond(Cond::E,
+                    i32::try_from(skip as usize - self.exe_buf.cur_pos() as usize).unwrap(),
+                ).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Cmp, c, 0i32).as_slice());
+            }
+            opcodes::HALT => {
                 let mut t = Vec::<u8>::new();
                 let volatile_regs = [R64::Rax, R64::Rcx, R64::Rdx, R64::R8, R64::R9, R64::R10, R64::R11];
                 for &r in &volatile_regs {
@@ -261,5 +272,27 @@ mod tests {
                 assert_eq!(s.finger, dst + 1);
             }
         }
+    }
+
+    #[test]
+    fn cmove() {
+        let mut s = State::new(vec![
+            opcodes::CMOVE << 28 | 0o012,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[0] = 50;
+        s.regs[1] = 60;
+        s.regs[2] = 70;
+        s.run();
+        assert_eq!(s.finger, 2);
+        assert_eq!(s.regs, [60, 60, 70, 0, 0, 0, 0, 0]);
+
+        s.finger = 0;
+        s.regs[0] = 50;
+        s.regs[1] = 60;
+        s.regs[2] = 0;
+        s.run();
+        assert_eq!(s.finger, 2);
+        assert_eq!(s.regs, [50, 60, 0, 0, 0, 0, 0, 0]);
     }
 }
