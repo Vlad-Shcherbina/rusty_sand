@@ -5,7 +5,7 @@ use crate::interp::opcodes;
 
 #[repr(C)]
 pub struct State {
-    finger: u32,
+    pub finger: u32,
     pub regs: [u32; 8],
     exe_buf: ExeBuf,
     jump_locations: Vec<*const u8>,
@@ -79,6 +79,9 @@ impl State {
             self.exe_buf.push(Gen::mov(R32::try_from(8 + a as u8).unwrap(), imm as i32).as_slice());
             return;
         }
+        let _a = ((insn >> 6) & 7) as usize;
+        let _b = ((insn >> 3) & 7) as usize;
+        let c = (insn & 7) as usize;
         match op {
             opcodes::HALT => { // halt
                 let mut t = Vec::<u8>::new();
@@ -104,6 +107,13 @@ impl State {
                 t.extend_from_slice(Gen::ret().as_slice());
 
                 self.exe_buf.push(t.as_slice());
+            }
+            opcodes::LOAD_PROGRAM => {
+                // TODO: assert regs[b] == 0
+                // TODO: assert regs[c] < jump_locations.len()
+                let c = R64::try_from(8 + c as u8).unwrap();
+                self.exe_buf.push(Gen::jump_indirect(Mem::base(R64::Rsi).index_scale(c, 8)).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, c).as_slice());
             }
             _ => todo!("op: {}", op),
         }
@@ -178,6 +188,9 @@ mod tests {
         let mut s = State::new(vec![opcodes::HALT << 28]);
         s.run();
         assert_eq!(s.finger, 1);
+        s.finger = 0;
+        s.run();
+        assert_eq!(s.finger, 1);
     }
 
     #[test]
@@ -192,6 +205,23 @@ mod tests {
             expected[reg as usize] = 42;
             assert_eq!(s.regs, expected);
             assert_eq!(s.finger, 2);
+        }
+    }
+
+    #[test]
+    fn load_program() {
+        for dst in 2..5 {
+            for reg in 0..8 {
+                let mut s = State::new(vec![
+                    opcodes::ORTHOGRAPHY << 28 | reg << 25 | dst,
+                    opcodes::LOAD_PROGRAM << 28 | (reg ^ 1) << 3 | reg,
+                    opcodes::HALT << 28,
+                    opcodes::HALT << 28,
+                    opcodes::HALT << 28,
+                ]);
+                s.run();
+                assert_eq!(s.finger, dst + 1);
+            }
         }
     }
 }
