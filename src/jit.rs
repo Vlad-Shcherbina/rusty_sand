@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use crate::exe_buf::ExeBuf;
-use crate::amd64_gen::{Gen, R32, R64, Binop, Mem, Cond};
+use crate::amd64_gen::{Gen, R32, R64, Binop, Mem, Cond, MulOp};
 use crate::interp::opcodes;
 
 #[repr(C)]
@@ -115,6 +115,43 @@ impl State {
                     i32::try_from(skip as usize - self.exe_buf.cur_pos() as usize).unwrap(),
                 ).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Cmp, c, 0i32).as_slice());
+            }
+            opcodes::ADDITION => {
+                let a = R32::try_from(8 + a as u8).unwrap();
+                let b = R32::try_from(8 + b as u8).unwrap();
+                let c = R32::try_from(8 + c as u8).unwrap();
+                self.exe_buf.push(Gen::binop(Binop::Add, a, c).as_slice());
+                self.exe_buf.push(Gen::mov(a, b).as_slice());
+            }
+            opcodes::MULTIPLICATION => {
+                let a = R32::try_from(8 + a as u8).unwrap();
+                let b = R32::try_from(8 + b as u8).unwrap();
+                let c = R32::try_from(8 + c as u8).unwrap();
+                self.exe_buf.push(Gen::pop(R64::Rdx).as_slice());
+                self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
+                self.exe_buf.push(Gen::mul_op(MulOp::Mul, c).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
+                self.exe_buf.push(Gen::push(R64::Rdx).as_slice());
+            }
+            opcodes::DIVISION => {
+                // TODO: maybe explicitly fail on division by zero?
+                let a = R32::try_from(8 + a as u8).unwrap();
+                let b = R32::try_from(8 + b as u8).unwrap();
+                let c = R32::try_from(8 + c as u8).unwrap();
+                self.exe_buf.push(Gen::pop(R64::Rdx).as_slice());
+                self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
+                self.exe_buf.push(Gen::mul_op(MulOp::Div, c).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Edx, 0i32).as_slice());
+                self.exe_buf.push(Gen::push(R64::Rdx).as_slice());
+            }
+            opcodes::NOT_AND => {
+                let a = R32::try_from(8 + a as u8).unwrap();
+                let b = R32::try_from(8 + b as u8).unwrap();
+                let c = R32::try_from(8 + c as u8).unwrap();
+                self.exe_buf.push(Gen::binop(Binop::Xor, a, -1i32).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::And, a, c).as_slice());
+                self.exe_buf.push(Gen::mov(a, b).as_slice());
             }
             opcodes::HALT => {
                 let mut t = Vec::<u8>::new();
@@ -294,5 +331,24 @@ mod tests {
         s.run();
         assert_eq!(s.finger, 2);
         assert_eq!(s.regs, [50, 60, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn arithmetic() {
+        let mut s = State::new(vec![
+            opcodes::ADDITION << 28 | 0o201,
+            opcodes::MULTIPLICATION << 28 | 0o301,
+            opcodes::DIVISION << 28 | 0o401,
+            opcodes::NOT_AND << 28 | 0o501,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[0] = 30;
+        s.regs[1] = 4;
+        s.run();
+        assert_eq!(s.finger, 5);
+        assert_eq!(s.regs[2], 30 + 4);
+        assert_eq!(s.regs[3], 30 * 4);
+        assert_eq!(s.regs[4], 30 / 4);
+        assert_eq!(s.regs[5], !(30 & 4));
     }
 }
