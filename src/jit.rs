@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use crate::exe_buf::ExeBuf;
-use crate::amd64_gen::{Gen, R32, R64, Binop};
+use crate::amd64_gen::{Gen, R32, R64, Binop, Mem};
 use crate::interp::opcodes;
 
 #[repr(C)]
@@ -93,9 +93,14 @@ impl State {
                 for &r in volatile_regs.iter().rev() {
                     t.extend_from_slice(Gen::pop(r).as_slice());
                 }
-                // TODO: save pos + 1 to self.finger
 
-                // ret from jit_trampoline naked fn
+                // self.finger <- pos + 1
+                t.extend_from_slice(Gen::mov(
+                    Mem::base(R64::Rbx).disp(i32::try_from(memoffset::offset_of!(State, finger)).unwrap()),
+                    i32::try_from(pos + 1).unwrap(),
+                ).as_slice());
+
+                // ret from 'call jump_locations[finger]' in State::run()
                 t.extend_from_slice(Gen::ret().as_slice());
 
                 self.exe_buf.push(t.as_slice());
@@ -169,6 +174,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn halt() {
+        let mut s = State::new(vec![opcodes::HALT << 28]);
+        s.run();
+        assert_eq!(s.finger, 1);
+    }
+
+    #[test]
     fn constant() {
         for reg in 0..8 {
             let mut s = State::new(vec![
@@ -179,6 +191,7 @@ mod tests {
             let mut expected = [0; 8];
             expected[reg as usize] = 42;
             assert_eq!(s.regs, expected);
+            assert_eq!(s.finger, 2);
         }
     }
 }
