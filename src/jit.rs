@@ -155,6 +155,63 @@ impl State {
                 self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, b).as_slice());
                 self.exe_buf.push(Gen::mov(R64::Rax, b).as_slice());
             }
+            opcodes::ARRAY_AMENDMENT => {
+                // TODO: bounds check
+                let a = R64::try_from(8 + a as u8).unwrap();
+                let b = R64::try_from(8 + b as u8).unwrap();
+                let c = R32::try_from(8 + c as u8).unwrap();
+
+                let skip = self.exe_buf.cur_pos();
+                self.exe_buf.push(fail_code("ARRAY_AMENDMENT TODO self modification").as_slice());
+
+                // if jump_targets[b] == jit_trampoline goto skip
+                self.exe_buf.push(Gen::jump_cond(
+                    Cond::E,
+                    i32::try_from(skip as usize - self.exe_buf.cur_pos() as usize).unwrap(),
+                ).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Cmp,
+                    Mem::base(R64::Rsi)
+                        .index_scale(b, 8),
+                    R64::Rax,
+                ).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, jit_trampoline as usize as i64).as_slice());
+
+                // if a != 0 goto skip
+                self.exe_buf.push(Gen::jump_cond(
+                    Cond::Ne,
+                    i32::try_from(skip as usize - self.exe_buf.cur_pos() as usize).unwrap(),
+                ).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Cmp, a, 0i64).as_slice());
+
+                // self.arrays[a][b] <- c
+                self.exe_buf.push(Gen::mov(
+                    Mem::base(R64::Rax).index_scale(b, 4),
+                    c,
+                ).as_slice());
+
+                // rax <- self.arrays[a].ptr
+                self.exe_buf.push(Gen::mov(
+                    R64::Rax,
+                    Mem::base(R64::Rax).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()),
+                ).as_slice());
+
+                // rax <- &self.arrays[a]
+                self.exe_buf.push(Gen::binop(Binop::Add,
+                    R64::Rax,
+                    Mem::base(R64::Rbx)
+                        .disp(i32::try_from(
+                            memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()),
+                ).as_slice());
+
+                // rax <- a * 24
+                assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, a).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, a).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, a).as_slice());
+            }
             opcodes::ADDITION => {
                 let a = R32::try_from(8 + a as u8).unwrap();
                 let b = R32::try_from(8 + b as u8).unwrap();
@@ -258,7 +315,7 @@ impl State {
             // let yyy = self.exe_buf.cur_pos();
             // let code = unsafe {std::slice::from_raw_parts(yyy, zzz as usize - yyy as usize) };
             // dbg!(crate::binutils::Obj::from_bytes(code).insns());
-            self.jump_locations[finger as usize] = self.exe_buf.cur_pos();
+            self.jump_locations[i as usize] = self.exe_buf.cur_pos();
         }
     }
 
@@ -430,5 +487,27 @@ mod tests {
         s.regs[3] = 3;
         s.run();
         assert_eq!(s.regs[1], 300);
+    }
+
+    #[test]
+    fn array_amendment() {
+        let mut s = State::new(vec![
+            opcodes::ARRAY_AMENDMENT << 28 | 0o123,
+            opcodes::HALT << 28,
+            0,
+        ]);
+        s.arrays.push(vec![0; 4]);
+        s.regs[1] = 1;
+        s.regs[2] = 2;
+        s.regs[3] = 42;
+        s.run();
+        assert_eq!(s.arrays[1], [0, 0, 42, 0]);
+
+        s.finger = 0;
+        s.regs[1] = 0;
+        s.regs[2] = 2;
+        s.regs[3] = 100;
+        s.run();
+        assert_eq!(s.arrays[0][2], 100);
     }
 }
