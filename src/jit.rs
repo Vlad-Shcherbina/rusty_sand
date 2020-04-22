@@ -316,6 +316,19 @@ impl State {
                     }
                 }
             }
+            opcodes::ABANDONMENT => {
+                let c = R32::try_from(8 + c as u8).unwrap();
+                for &r in VOLATILE_REGS {
+                    self.exe_buf.push(Gen::pop(r).as_slice());
+                }
+                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, State::abandonment as usize as i64).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Edx, c).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+                for &r in VOLATILE_REGS.iter().rev() {
+                    self.exe_buf.push(Gen::push(r).as_slice());
+                }
+            }
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
@@ -377,7 +390,6 @@ impl State {
         }
         self.jump_locations[start..finger + 1].fill(jt);
         println!("State::uncompile({}..={})", start, finger);
-        // std::process::exit(1);
     }
 
     extern "win64" fn allocation(&mut self, size: u32) -> u32 {
@@ -397,6 +409,12 @@ impl State {
         assert!(idx != 0);
         dbg!(idx);
         idx
+    }
+
+    extern "win64" fn abandonment(&mut self, idx: u32) {
+        println!("State::abandonment({})", idx);
+        self.arrays[idx as usize] = vec![];
+        self.free.push(idx);
     }
 
     pub fn run(&mut self) {
@@ -623,5 +641,18 @@ mod tests {
         assert_eq!(s.arrays[2], [0; 7]);
         assert_eq!(s.regs[0], 1);
         assert_eq!(s.regs[6], 2);
+    }
+
+    #[test]
+    fn abandonment() {
+        let mut s = State::new(vec![
+            opcodes::ABANDONMENT << 28 | 0o007,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[7] = 1;
+        s.arrays.push(vec![0, 0]);
+        s.run();
+        assert_eq!(s.arrays[1].capacity(), 0);
+        assert_eq!(s.free, [1]);
     }
 }
