@@ -91,6 +91,10 @@ fn is_fallthrough(cmd: u32) -> bool {
     op != opcodes::HALT && op != opcodes::LOAD_PROGRAM
 }
 
+const VEC_PTR_OFFSET: usize = 0;
+const VEC_CAPACITY_OFFSET: usize = 8;
+const VEC_LEN_OFFSET: usize = 16;
+
 impl State {
     fn compile_insn(&mut self, pos: usize) {
         let insn = self.arrays[0][pos];
@@ -115,6 +119,41 @@ impl State {
                     i32::try_from(skip as usize - self.exe_buf.cur_pos() as usize).unwrap(),
                 ).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Cmp, c, 0i32).as_slice());
+            }
+            opcodes::ARRAY_INDEX => {
+                // TODO: bounds check
+                let a = R32::try_from(8 + a as u8).unwrap();
+                let b = R64::try_from(8 + b as u8).unwrap();
+                let c = R64::try_from(8 + c as u8).unwrap();
+
+                // a <- self.arrays[b][c]
+                self.exe_buf.push(Gen::mov(
+                    a,
+                    Mem::base(R64::Rax).index_scale(c, 4),
+                ).as_slice());
+
+                // rax <- self.arrays[b].ptr
+                self.exe_buf.push(Gen::mov(
+                    R64::Rax,
+                    Mem::base(R64::Rax).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()),
+                ).as_slice());
+
+                // rax <- &self.arrays[b]
+                self.exe_buf.push(Gen::binop(Binop::Add,
+                    R64::Rax,
+                    Mem::base(R64::Rbx)
+                        .disp(i32::try_from(
+                            memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()),
+                ).as_slice());
+
+                // rax <- b * 24
+                assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, b).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, b).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, b).as_slice());
             }
             opcodes::ADDITION => {
                 let a = R32::try_from(8 + a as u8).unwrap();
@@ -214,7 +253,11 @@ impl State {
         }
         println!("State::compile({}..={})", finger, end);
         for i in (finger..end + 1).rev() {
+            // let zzz = self.exe_buf.cur_pos();
             self.compile_insn(i);
+            // let yyy = self.exe_buf.cur_pos();
+            // let code = unsafe {std::slice::from_raw_parts(yyy, zzz as usize - yyy as usize) };
+            // dbg!(crate::binutils::Obj::from_bytes(code).insns());
             self.jump_locations[finger as usize] = self.exe_buf.cur_pos();
         }
     }
@@ -268,6 +311,30 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check_vec_layout<T: Default>() {
+        let mut xs = Vec::<T>::with_capacity(10);
+        xs.push(T::default());
+        xs.push(T::default());
+        let ptr = &xs as *const _ as *const u8;
+        unsafe {
+            assert_eq!((ptr.add(VEC_PTR_OFFSET) as *const u64).read(), &xs[0] as *const _ as u64);
+            assert_eq!((ptr.add(VEC_CAPACITY_OFFSET) as *const u64).read(), 10);
+            assert_eq!((ptr.add(VEC_LEN_OFFSET) as *const u64).read(), 2);
+        }
+
+    }
+
+    #[test]
+    fn vec_layout() {
+        // From Vec documentation:
+        // "Vec is and always will be a (pointer, capacity, length) triplet.
+        // No more, no less. The order of these fields is completely
+        // unspecified.""
+        // So we test it just in case.
+        check_vec_layout::<u32>();
+        check_vec_layout::<Vec<u32>>();
+    }
 
     #[test]
     fn halt() {
@@ -350,5 +417,18 @@ mod tests {
         assert_eq!(s.regs[3], 30 * 4);
         assert_eq!(s.regs[4], 30 / 4);
         assert_eq!(s.regs[5], !(30 & 4));
+    }
+
+    #[test]
+    fn array_index() {
+        let mut s = State::new(vec![
+            opcodes::ARRAY_INDEX << 28 | 0o123,
+            opcodes::HALT << 28,
+        ]);
+        s.arrays.push(vec![0, 100, 200, 300]);
+        s.regs[2] = 1;
+        s.regs[3] = 3;
+        s.run();
+        assert_eq!(s.regs[1], 300);
     }
 }
