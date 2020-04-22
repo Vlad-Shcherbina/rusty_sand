@@ -291,6 +291,31 @@ impl State {
 
                 self.exe_buf.push(t.as_slice());
             }
+            opcodes::ALLOCATION => {
+                let c = R32::try_from(8 + c as u8).unwrap();
+                let b = R32::try_from(8 + b as u8).unwrap();
+
+                // b <- call self.allocation(c)
+                self.exe_buf.push(Gen::mov(b, R32::Eax).as_slice());
+                for &r in VOLATILE_REGS {
+                    if r != R64::Rax {
+                        self.exe_buf.push(Gen::pop(r).as_slice());
+                    } else {
+                        self.exe_buf.push(Gen::binop(Binop::Add, R64::Rsp, 8i64).as_slice());
+                    }
+                }
+                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, State::allocation as usize as i64).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Edx, c).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+                for &r in VOLATILE_REGS.iter().rev() {
+                    if r != R64::Rax {
+                        self.exe_buf.push(Gen::push(r).as_slice());
+                    } else {
+                        self.exe_buf.push(Gen::binop(Binop::Sub, R64::Rsp, 8i64).as_slice());
+                    }
+                }
+            }
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
@@ -353,6 +378,25 @@ impl State {
         self.jump_locations[start..finger + 1].fill(jt);
         println!("State::uncompile({}..={})", start, finger);
         // std::process::exit(1);
+    }
+
+    extern "win64" fn allocation(&mut self, size: u32) -> u32 {
+        println!("State::allocation({})", size);
+        let arr = vec![0u32; size as usize];
+        let idx = match self.free.pop() {
+            Some(i) => {
+                assert!(self.arrays[i as usize].is_empty());
+                self.arrays[i as usize] = arr;
+                i
+            }
+            None => {
+                self.arrays.push(arr);
+                (self.arrays.len() - 1) as u32
+            }
+        };
+        assert!(idx != 0);
+        dbg!(idx);
+        idx
     }
 
     pub fn run(&mut self) {
@@ -561,5 +605,23 @@ mod tests {
         assert_eq!(s.finger, 3);
         assert_eq!(s.arrays[0][1], opcodes::ORTHOGRAPHY << 28 | 42);
         assert_eq!(s.regs[0], 42);
+    }
+
+    #[test]
+    fn allocation() {
+        let mut s = State::new(vec![
+            opcodes::ALLOCATION << 28 | 0o001,
+            opcodes::ALLOCATION << 28 | 0o063,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[1] = 5;
+        s.regs[3] = 7;
+        s.run();
+        dbg!(s.regs);
+        assert_eq!(s.arrays.len(), 3);
+        assert_eq!(s.arrays[1], [0; 5]);
+        assert_eq!(s.arrays[2], [0; 7]);
+        assert_eq!(s.regs[0], 1);
+        assert_eq!(s.regs[6], 2);
     }
 }
