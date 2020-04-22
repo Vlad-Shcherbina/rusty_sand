@@ -241,8 +241,9 @@ impl State {
                 let a = R32::try_from(8 + a as u8).unwrap();
                 let b = R32::try_from(8 + b as u8).unwrap();
                 let c = R32::try_from(8 + c as u8).unwrap();
-                self.exe_buf.push(Gen::binop(Binop::Add, a, c).as_slice());
-                self.exe_buf.push(Gen::mov(a, b).as_slice());
+                self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Add, R32::Eax, c).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
             }
             opcodes::MULTIPLICATION => {
                 let a = R32::try_from(8 + a as u8).unwrap();
@@ -270,9 +271,10 @@ impl State {
                 let a = R32::try_from(8 + a as u8).unwrap();
                 let b = R32::try_from(8 + b as u8).unwrap();
                 let c = R32::try_from(8 + c as u8).unwrap();
-                self.exe_buf.push(Gen::binop(Binop::Xor, a, -1i32).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::And, a, c).as_slice());
-                self.exe_buf.push(Gen::mov(a, b).as_slice());
+                self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::Xor, R32::Eax, -1i32).as_slice());
+                self.exe_buf.push(Gen::binop(Binop::And, R32::Eax, c).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
             }
             opcodes::HALT => {
                 let mut t = Vec::<u8>::new();
@@ -595,6 +597,49 @@ mod tests {
         assert_eq!(s.regs[3], 30 * 4);
         assert_eq!(s.regs[4], 30 / 4);
         assert_eq!(s.regs[5], !(30 & 4));
+    }
+
+    #[test]
+    fn inplace_binop() {
+        let mut s = State::new(vec![
+            opcodes::ADDITION << 28 | 0o112,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[1] = 1234;
+        s.regs[2] = 5678;
+        s.run();
+        assert_eq!(s.regs[1], 1234 + 5678);
+        assert_eq!(s.regs[2], 5678);
+
+        let mut s = State::new(vec![
+            opcodes::ADDITION << 28 | 0o121,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[1] = 1234;
+        s.regs[2] = 5678;
+        s.run();
+        assert_eq!(s.regs[1], 5678 + 1234);
+        assert_eq!(s.regs[2], 5678);
+
+        let mut s = State::new(vec![
+            opcodes::NOT_AND << 28 | 0o112,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[1] = 1234;
+        s.regs[2] = 5678;
+        s.run();
+        assert_eq!(s.regs[1], !(1234 & 5678));
+        assert_eq!(s.regs[2], 5678);
+
+        let mut s = State::new(vec![
+            opcodes::NOT_AND << 28 | 0o121,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[1] = 1234;
+        s.regs[2] = 5678;
+        s.run();
+        assert_eq!(s.regs[1], !(5678 & 1234));
+        assert_eq!(s.regs[2], 5678);
     }
 
     #[test]
