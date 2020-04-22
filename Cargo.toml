@@ -10,6 +10,7 @@ edition = "2018"
 tempfile = "*"
 winapi = { version = "*", features = ["memoryapi", "sysinfoapi"] }
 memoffset = "*"
+mimalloc = { version = "*", default-features = false, optional = true }
 
 [features]
 clippy = []  # https://github.com/rust-lang/cargo/issues/8075
