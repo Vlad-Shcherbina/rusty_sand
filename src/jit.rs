@@ -99,7 +99,7 @@ fn is_fallthrough(cmd: u32) -> bool {
 }
 
 const VEC_PTR_OFFSET: usize = 0;
-const VEC_CAPACITY_OFFSET: usize = 8;
+#[cfg(test)] const VEC_CAPACITY_OFFSET: usize = 8;
 const VEC_LEN_OFFSET: usize = 16;
 
 /// Registers that should be saved by the caller in the win64 calling convention.
@@ -366,10 +366,36 @@ impl State {
                 ).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Cmp, c, R64::Rdi).as_slice());
 
-                let no_fail = self.exe_buf.cur_pos();
-                self.exe_buf.push(fail_code("LOAD_PROGRAM: b != 0\0").as_slice());
+                let no_switch_code = self.exe_buf.cur_pos();
+
+                // rsi <- jump_locations
+                self.exe_buf.push(Gen::mov(
+                    R64::Rsi,
+                    Mem::base(R64::Rbx).disp(i32::try_from(
+                        memoffset::offset_of!(State, jump_locations) + VEC_PTR_OFFSET).unwrap()),
+                ).as_slice());
+                // rdi <- jump_locations.len
+                self.exe_buf.push(Gen::mov(
+                    R64::Rdi,
+                    Mem::base(R64::Rbx).disp(i32::try_from(
+                        memoffset::offset_of!(State, jump_locations) + VEC_LEN_OFFSET).unwrap()),
+                ).as_slice());
+
+                // call self.swith_code(b)
+                for &r in VOLATILE_REGS {
+                    self.exe_buf.push(Gen::pop(r).as_slice());
+                }
+                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, State::switch_code as usize as i64).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rdx, b).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+                for &r in VOLATILE_REGS.iter().rev() {
+                    self.exe_buf.push(Gen::push(r).as_slice());
+                }
+
+                // if b != 0 goto no_switch_code
                 self.exe_buf.push(Gen::jump_cond(Cond::E,
-                    i32::try_from(no_fail as usize - self.exe_buf.cur_pos() as usize).unwrap(),
+                    i32::try_from(no_switch_code as usize - self.exe_buf.cur_pos() as usize).unwrap(),
                 ).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Cmp, b, 0i64).as_slice());
             }
@@ -417,6 +443,13 @@ impl State {
         println!("State::uncompile({}..={})", start, finger);
     }
 
+    extern "win64" fn switch_code(&mut self, idx: u32) {
+        assert!(idx != 0);
+        println!("State::switch_code({})", idx);
+        self.arrays[0] = self.arrays[idx as usize].clone();
+        self.jump_locations = vec![jit_trampoline as *const u8; self.arrays[0].len()];
+    }
+
     extern "win64" fn allocation(&mut self, size: u32) -> u32 {
         println!("State::allocation({})", size);
         let arr = vec![0u32; size as usize];
@@ -432,7 +465,6 @@ impl State {
             }
         };
         assert!(idx != 0);
-        dbg!(idx);
         idx
     }
 
@@ -556,6 +588,26 @@ mod tests {
                 assert_eq!(s.finger, dst + 1);
             }
         }
+    }
+
+    #[test]
+    fn load_program_switch_code() {
+        let mut s = State::new(vec![
+            opcodes::LOAD_PROGRAM << 28 | 0o012,
+        ]);
+        s.arrays.push(vec![
+            opcodes::HALT << 28,
+            opcodes::HALT << 28,
+            opcodes::ORTHOGRAPHY << 28 | 42,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[1] = 1;
+        s.regs[2] = 2;
+        s.run();
+        assert_eq!(s.finger, 4);
+        assert_eq!(s.arrays[0], s.arrays[1]);
+        assert_eq!(s.regs[0], 42);
+        dbg!(s.jump_locations);
     }
 
     #[test]
