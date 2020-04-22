@@ -95,6 +95,9 @@ const VEC_PTR_OFFSET: usize = 0;
 const VEC_CAPACITY_OFFSET: usize = 8;
 const VEC_LEN_OFFSET: usize = 16;
 
+/// Registers that should be saved by the caller in the win64 calling convention.
+const VOLATILE_REGS: &[R64] = &[R64::Rax, R64::Rcx, R64::Rdx, R64::R8, R64::R9, R64::R10, R64::R11];
+
 impl State {
     fn compile_insn(&mut self, pos: usize) {
         let insn = self.arrays[0][pos];
@@ -162,7 +165,22 @@ impl State {
                 let c = R32::try_from(8 + c as u8).unwrap();
 
                 let skip = self.exe_buf.cur_pos();
-                self.exe_buf.push(fail_code("ARRAY_AMENDMENT TODO self modification").as_slice());
+
+                // jump to the next instruction
+                self.exe_buf.push(Gen::jump_indirect(Mem::base(R64::Rsi).index_scale(R64::Rax, 8)).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Eax, i32::try_from(pos + 1).unwrap()).as_slice());
+
+                // call self.uncompile(b)
+                for &r in VOLATILE_REGS {
+                    self.exe_buf.push(Gen::pop(r).as_slice());
+                }
+                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, State::uncompile as usize as i64).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rdx, b).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+                for &r in VOLATILE_REGS.iter().rev() {
+                    self.exe_buf.push(Gen::push(r).as_slice());
+                }
 
                 // if jump_targets[b] == jit_trampoline goto skip
                 self.exe_buf.push(Gen::jump_cond(
@@ -251,15 +269,14 @@ impl State {
             }
             opcodes::HALT => {
                 let mut t = Vec::<u8>::new();
-                let volatile_regs = [R64::Rax, R64::Rcx, R64::Rdx, R64::R8, R64::R9, R64::R10, R64::R11];
-                for &r in &volatile_regs {
+                for &r in VOLATILE_REGS {
                     t.extend_from_slice(Gen::push(r).as_slice());
                 }
                 t.extend_from_slice(Gen::binop(Binop::Sub, R64::Rsp, 0x20i64).as_slice());
                 t.extend_from_slice(Gen::mov(R64::Rax, halt as usize as i64).as_slice());
                 t.extend_from_slice(Gen::call_indirect(R64::Rax).as_slice());
                 t.extend_from_slice(Gen::binop(Binop::Add, R64::Rsp, 0x20i64).as_slice());
-                for &r in volatile_regs.iter().rev() {
+                for &r in VOLATILE_REGS.iter().rev() {
                     t.extend_from_slice(Gen::pop(r).as_slice());
                 }
 
@@ -317,6 +334,25 @@ impl State {
             // dbg!(crate::binutils::Obj::from_bytes(code).insns());
             self.jump_locations[i as usize] = self.exe_buf.cur_pos();
         }
+    }
+
+    extern "win64" fn uncompile(&mut self, finger: u32) {
+        let finger = finger as usize;
+        let jt = jit_trampoline as *const u8;
+        assert!(self.jump_locations[finger] != jt);
+        let mut start = finger;
+        // TODO: in principle it's enough to backtrack up to the first
+        // non-fallthrough instruction, but we should look
+        // at the instructions before amendment.
+        // Currently uncompile() is called after amendment,
+        // so we have no way of knowing if the instruction was fallthrough.
+        while start > 0 && self.jump_locations[start - 1] != jt
+            /* && is_fallthrough(self.arrays[0][start - 1]) */ {
+            start -= 1;
+        }
+        self.jump_locations[start..finger + 1].fill(jt);
+        println!("State::uncompile({}..={})", start, finger);
+        // std::process::exit(1);
     }
 
     pub fn run(&mut self) {
@@ -509,5 +545,21 @@ mod tests {
         s.regs[3] = 100;
         s.run();
         assert_eq!(s.arrays[0][2], 100);
+    }
+
+    #[test]
+    fn array_amendment_with_recompilation() {
+        let mut s = State::new(vec![
+            opcodes::ARRAY_AMENDMENT << 28 | 0o123,
+            opcodes::HALT << 28,
+            opcodes::HALT << 28,
+        ]);
+        s.regs[1] = 0;
+        s.regs[2] = 1;
+        s.regs[3] = opcodes::ORTHOGRAPHY << 28 | 42;
+        s.run();
+        assert_eq!(s.finger, 3);
+        assert_eq!(s.arrays[0][1], opcodes::ORTHOGRAPHY << 28 | 42);
+        assert_eq!(s.regs[0], 42);
     }
 }
