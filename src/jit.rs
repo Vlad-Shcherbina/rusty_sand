@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::convert::TryFrom;
 use crate::exe_buf::ExeBuf;
 use crate::amd64_gen::{Gen, R32, R64, Binop, Mem, Cond, MulOp};
@@ -63,12 +63,24 @@ unsafe fn jit_trampoline() {
 }
 
 extern "win64" fn halt() {
-    println!("halt");
+    // println!("halt");
 }
 
 extern "win64" fn output(c: u32) {
     print!("{}", u8::try_from(c).unwrap() as char);
     std::io::stdout().flush().unwrap();
+}
+
+extern "win64" fn input() -> u32 {
+    let mut ch = 0u8;
+    match std::io::stdin().read_exact(std::slice::from_mut(&mut ch)) {
+        Ok(()) => ch as u32,
+        Err(e) => if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            !0
+        } else {
+            panic!("{}", e)
+        }
+    }
 }
 
 extern "win64" fn fail(s: *const std::os::raw::c_char) {
@@ -350,6 +362,26 @@ impl State {
                     self.exe_buf.push(Gen::push(r).as_slice());
                 }
             }
+            opcodes::INPUT => {
+                let c = R32::try_from(8 + c as u8).unwrap();
+                self.exe_buf.push(Gen::mov(c, R32::Eax).as_slice());
+                for &r in VOLATILE_REGS {
+                    if r != R64::Rax {
+                        self.exe_buf.push(Gen::pop(r).as_slice());
+                    } else {
+                        self.exe_buf.push(Gen::binop(Binop::Add, R64::Rsp, 8i64).as_slice());
+                    }
+                }
+                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, input as usize as i64).as_slice());
+                for &r in VOLATILE_REGS.iter().rev() {
+                    if r != R64::Rax {
+                        self.exe_buf.push(Gen::push(r).as_slice());
+                    } else {
+                        self.exe_buf.push(Gen::binop(Binop::Sub, R64::Rsp, 8i64).as_slice());
+                    }
+                }
+            }
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
@@ -410,10 +442,10 @@ impl State {
         while is_fallthrough(self.arrays[0][end]) {
             end += 1;
         }
-        println!("State::compile({}..={})", finger, end);
-        for i in finger..end + 1 {
-            println!("{:>5}: {}", i, interp::insn_to_string(self.arrays[0][i]));
-        }
+        // println!("State::compile({}..={})", finger, end);
+        // for i in finger..end + 1 {
+        //     println!("{:>5}: {}", i, interp::insn_to_string(self.arrays[0][i]));
+        // }
         for i in (finger..end + 1).rev() {
             // let zzz = self.exe_buf.cur_pos();
             self.compile_insn(i);
@@ -440,18 +472,18 @@ impl State {
             start -= 1;
         }
         self.jump_locations[start..finger + 1].fill(jt);
-        println!("State::uncompile({}..={})", start, finger);
+        // println!("State::uncompile({}..={})", start, finger);
     }
 
     extern "win64" fn switch_code(&mut self, idx: u32) {
         assert!(idx != 0);
-        println!("State::switch_code({})", idx);
+        // println!("State::switch_code({})", idx);
         self.arrays[0] = self.arrays[idx as usize].clone();
         self.jump_locations = vec![jit_trampoline as *const u8; self.arrays[0].len()];
     }
 
     extern "win64" fn allocation(&mut self, size: u32) -> u32 {
-        println!("State::allocation({})", size);
+        // println!("State::allocation({})", size);
         let arr = vec![0u32; size as usize];
         let idx = match self.free.pop() {
             Some(i) => {
@@ -469,7 +501,7 @@ impl State {
     }
 
     extern "win64" fn abandonment(&mut self, idx: u32) {
-        println!("State::abandonment({})", idx);
+        // println!("State::abandonment({})", idx);
         self.arrays[idx as usize] = vec![];
         self.free.push(idx);
     }
@@ -516,7 +548,7 @@ impl State {
             : "memory", "cc"
             : "intel");
         }
-        println!("done");
+        // println!("done");
     }
 }
 
@@ -524,10 +556,10 @@ impl State {
 mod tests {
     use super::*;
 
-    fn check_vec_layout<T: Default>() {
+    fn check_vec_layout<T: Clone>(elem: T) {
         let mut xs = Vec::<T>::with_capacity(10);
-        xs.push(T::default());
-        xs.push(T::default());
+        xs.push(elem.clone());
+        xs.push(elem.clone());
         let ptr = &xs as *const _ as *const u8;
         unsafe {
             assert_eq!((ptr.add(VEC_PTR_OFFSET) as *const u64).read(), &xs[0] as *const _ as u64);
@@ -544,8 +576,9 @@ mod tests {
         // No more, no less. The order of these fields is completely
         // unspecified.""
         // So we test it just in case.
-        check_vec_layout::<u32>();
-        check_vec_layout::<Vec<u32>>();
+        check_vec_layout::<u32>(0);
+        check_vec_layout::<*const u8>(std::ptr::null());
+        check_vec_layout::<Vec<u32>>(vec![]);
     }
 
     #[test]
@@ -607,7 +640,6 @@ mod tests {
         assert_eq!(s.finger, 4);
         assert_eq!(s.arrays[0], s.arrays[1]);
         assert_eq!(s.regs[0], 42);
-        dbg!(s.jump_locations);
     }
 
     #[test]
@@ -755,7 +787,6 @@ mod tests {
         s.regs[1] = 5;
         s.regs[3] = 7;
         s.run();
-        dbg!(s.regs);
         assert_eq!(s.arrays.len(), 3);
         assert_eq!(s.arrays[1], [0; 5]);
         assert_eq!(s.arrays[2], [0; 7]);
