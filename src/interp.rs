@@ -52,10 +52,16 @@ pub fn insn_to_string(insn: u32) -> String {
     let c = (insn & 7) as usize;
     match op {
         opcodes::CMOVE => format!("if r{} != 0: r{} = r{}", c, a, b),
+        opcodes::ARRAY_INDEX => format!("r{} = arrays[r{}][r{}]", a, b, c),
+        opcodes::ARRAY_AMENDMENT => format!("arrays[r{}][r{}] = r{}", a, b, c),
         opcodes::ADDITION => format!("r{} = r{} + r{}", a, b, c),
+        opcodes::MULTIPLICATION => format!("r{} = r{} * r{}", a, b, c),
+        opcodes::DIVISION => format!("r{} = r{} / r{}", a, b, c),
         opcodes::NOT_AND => format!("r{} = ~(r{} & r{})", a, b, c),
         opcodes::OUTPUT => format!("OUTPUT r{}", c),
         opcodes::HALT => "HALT".to_string(),
+        opcodes::ALLOCATION => format!("r{} = ALLOCATION r{}", b, c),
+        opcodes::ABANDONMENT => format!("ABANDOMENT r{}", c),
         opcodes::LOAD_PROGRAM => format!("LOAD_PROGRAM r{} r{}", b, c),
         _ => panic!("{}", op),
     }
