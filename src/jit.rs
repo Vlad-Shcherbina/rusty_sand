@@ -1,6 +1,8 @@
+use std::io::Write;
 use std::convert::TryFrom;
 use crate::exe_buf::ExeBuf;
 use crate::amd64_gen::{Gen, R32, R64, Binop, Mem, Cond, MulOp};
+use crate::interp;
 use crate::interp::opcodes;
 
 #[repr(C)]
@@ -62,6 +64,11 @@ unsafe fn jit_trampoline() {
 
 extern "win64" fn halt() {
     println!("halt");
+}
+
+extern "win64" fn output(c: u32) {
+    print!("{}", u8::try_from(c).unwrap() as char);
+    std::io::stdout().flush().unwrap();
 }
 
 extern "win64" fn fail(s: *const std::os::raw::c_char) {
@@ -329,6 +336,18 @@ impl State {
                     self.exe_buf.push(Gen::push(r).as_slice());
                 }
             }
+            opcodes::OUTPUT => {
+                let c = R32::try_from(8 + c as u8).unwrap();
+                for &r in VOLATILE_REGS {
+                    self.exe_buf.push(Gen::pop(r).as_slice());
+                }
+                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
+                self.exe_buf.push(Gen::mov(R64::Rax, output as usize as i64).as_slice());
+                self.exe_buf.push(Gen::mov(R32::Ecx, c).as_slice());
+                for &r in VOLATILE_REGS.iter().rev() {
+                    self.exe_buf.push(Gen::push(r).as_slice());
+                }
+            }
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
@@ -364,12 +383,16 @@ impl State {
             end += 1;
         }
         println!("State::compile({}..={})", finger, end);
+        for i in finger..end + 1 {
+            println!("{:>5}: {}", i, interp::insn_to_string(self.arrays[0][i]));
+        }
         for i in (finger..end + 1).rev() {
             // let zzz = self.exe_buf.cur_pos();
             self.compile_insn(i);
             // let yyy = self.exe_buf.cur_pos();
             // let code = unsafe {std::slice::from_raw_parts(yyy, zzz as usize - yyy as usize) };
             // dbg!(crate::binutils::Obj::from_bytes(code).insns());
+            // crate::binutils::Obj::from_bytes(code).insns();
             self.jump_locations[i as usize] = self.exe_buf.cur_pos();
         }
     }
@@ -654,5 +677,17 @@ mod tests {
         s.run();
         assert_eq!(s.arrays[1].capacity(), 0);
         assert_eq!(s.free, [1]);
+    }
+
+    #[test]
+    fn output() {
+        let mut code = Vec::<u32>::new();
+        for &c in b"hello, world!\n" {
+            code.push(opcodes::ORTHOGRAPHY << 28 | 3 << 25 | c as u32);
+            code.push(opcodes::OUTPUT << 28 | 0o003);
+        }
+        code.push(opcodes::HALT << 28);
+        let mut s = State::new(code);
+        s.run();
     }
 }

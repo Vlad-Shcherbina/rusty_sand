@@ -42,6 +42,25 @@ pub mod opcodes {
     pub const ORTHOGRAPHY: u32 = 13;
 }
 
+pub fn insn_to_string(insn: u32) -> String {
+    let op = insn >> 28;
+    if op == opcodes::ORTHOGRAPHY {
+        return format!("r{} = {}", ((insn >> 25) & 7), insn & ((1 << 25) - 1))
+    }
+    let a = ((insn >> 6) & 7) as usize;
+    let b = ((insn >> 3) & 7) as usize;
+    let c = (insn & 7) as usize;
+    match op {
+        opcodes::CMOVE => format!("if r{} != 0: r{} = r{}", c, a, b),
+        opcodes::ADDITION => format!("r{} = r{} + r{}", a, b, c),
+        opcodes::NOT_AND => format!("r{} = ~(r{} & r{})", a, b, c),
+        opcodes::OUTPUT => format!("OUTPUT r{}", c),
+        opcodes::HALT => "HALT".to_string(),
+        opcodes::LOAD_PROGRAM => format!("LOAD_PROGRAM r{} r{}", b, c),
+        _ => panic!("{}", op),
+    }
+}
+
 impl Machine {
     pub fn new(prog: &[u32]) -> Self {
         Self {
