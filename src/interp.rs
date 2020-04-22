@@ -68,16 +68,16 @@ pub fn insn_to_string(insn: u32) -> String {
 }
 
 impl Machine {
-    pub fn new(prog: &[u32]) -> Self {
+    pub fn new(prog: Vec<u32>) -> Self {
         Self {
-            regs: [0; 8],
-            finger: 0,
-            arrays: vec![prog.to_vec()],
-            free: vec![],
             stats: Stats {
                 word_states: vec![WordState::Initial; prog.len()],
                 ..Stats::default()
             },
+            regs: [0; 8],
+            arrays: vec![prog],
+            finger: 0,
+            free: vec![],
         }
     }
 
