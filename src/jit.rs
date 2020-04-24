@@ -164,31 +164,25 @@ impl State {
                 let b = R64::try_from(8 + b as u8).unwrap();
                 let c = R64::try_from(8 + c as u8).unwrap();
 
-                // a <- self.arrays[b][c]
+                // lea rax, [b + 2 * b]
+                // mov rcx, self.arrays.ptr
+                // mov rax, [rcx + 8 * rax + VEC_PTR_OFFSET]
+                // mov a, [rax + 4 * c]
+
+                assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
                 self.exe_buf.push(Gen::mov(
                     a,
                     Mem::base(R64::Rax).index_scale(c, 4),
                 ).as_slice());
-
-                // rax <- self.arrays[b].ptr
                 self.exe_buf.push(Gen::mov(
                     R64::Rax,
-                    Mem::base(R64::Rax).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()),
+                    Mem::base(R64::Rcx).index_scale(R64::Rax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()),
                 ).as_slice());
-
-                // rax <- &self.arrays[b]
-                self.exe_buf.push(Gen::binop(Binop::Add,
-                    R64::Rax,
-                    Mem::base(R64::Rbx)
-                        .disp(i32::try_from(
-                            memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()),
+                self.exe_buf.push(Gen::mov(
+                    R64::Rcx,
+                    Mem::base(R64::Rbx).disp(i32::try_from(
+                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()),
                 ).as_slice());
-
-                // rax <- b * 24
-                assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
                 self.exe_buf.push(Gen::lea(R64::Rax, Mem::base(b).index_scale(b, 2)).as_slice());
             }
             opcodes::ARRAY_AMENDMENT => {
@@ -560,7 +554,7 @@ impl State {
               "{r13d}"(self.regs[5]),
               "{r14d}"(self.regs[6]),
               "{r15d}"(self.regs[7])
-            : "memory", "cc"
+            : "memory", "cc", "rcx", "rdx"
             : "intel");
         }
         // println!("done");
