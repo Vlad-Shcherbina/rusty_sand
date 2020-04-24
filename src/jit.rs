@@ -2,8 +2,19 @@ use std::io::{Read, Write};
 use std::convert::TryFrom;
 use crate::exe_buf::ExeBuf;
 use crate::amd64_gen::{Gen, R32, R64, Binop, Mem, Cond, MulOp};
-use crate::interp;
 use crate::interp::opcodes;
+
+#[derive(Default)]
+pub struct OpStat {
+    pub cnt: usize,
+    pub code_len: usize,
+}
+
+#[derive(Default)]
+pub struct Stats {
+    pub ops: [OpStat; 14],
+    pub compile_time: f64,
+}
 
 #[repr(C)]
 pub struct State {
@@ -13,6 +24,7 @@ pub struct State {
     jump_locations: Vec<*const u8>,
     arrays: Vec<Vec<u32>>,
     free: Vec<u32>,
+    pub stats: Stats,
 }
 
 impl State {
@@ -25,6 +37,7 @@ impl State {
             jump_locations: vec![jt; prog.len()],
             arrays: vec![prog],
             free: vec![],
+            stats: Stats::default(),
         }
     }
 }
@@ -121,10 +134,13 @@ impl State {
     fn compile_insn(&mut self, pos: usize) {
         let insn = self.arrays[0][pos];
         let op = insn >> 28;
+        self.stats.ops[op as usize].cnt += 1;
+        let end_ptr = self.exe_buf.cur_pos();
         if op == opcodes::ORTHOGRAPHY {
             let a = ((insn >> 25) & 7) as usize;
             let imm = insn & ((1 << 25) - 1);
             self.exe_buf.push(Gen::mov(R32::try_from(8 + a as u8).unwrap(), imm as i32).as_slice());
+            self.stats.ops[op as usize].code_len += end_ptr as usize - self.exe_buf.cur_pos() as usize;
             return;
         }
         let a = ((insn >> 6) & 7) as usize;
@@ -431,11 +447,13 @@ impl State {
                 ).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Cmp, b, 0i64).as_slice());
             }
-            _ => todo!("op: {}", op),
+            _ => panic!("op: {}", op),
         }
+        self.stats.ops[op as usize].code_len += end_ptr as usize - self.exe_buf.cur_pos() as usize;
     }
 
     extern "win64" fn compile(&mut self, finger: u32) {
+        let timer = std::time::Instant::now();
         let finger = finger as usize;
         let mut end = finger;
         assert_eq!(self.jump_locations[end], jit_trampoline as *const u8);
@@ -455,6 +473,7 @@ impl State {
             // crate::binutils::Obj::from_bytes(code).insns();
             self.jump_locations[i as usize] = self.exe_buf.cur_pos();
         }
+        self.stats.compile_time += timer.elapsed().as_secs_f64();
     }
 
     extern "win64" fn uncompile(&mut self, finger: u32) {

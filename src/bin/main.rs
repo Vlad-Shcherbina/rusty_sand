@@ -37,6 +37,15 @@ fn main() {
         m.run();
         if show_stats {
             eprintln!("it took {:.3} s", start.elapsed().as_secs_f64());
+            eprintln!("compilation took {:.3} s", m.stats.compile_time);
+            let mut total_cnt = 0;
+            let mut total_code_len = 0;
+            for (s, name) in m.stats.ops.iter().zip(&interp::OPCODE_NAMES) {
+                eprintln!("{:>10} {:>10}  {}", s.cnt, s.code_len, name);
+                total_cnt += s.cnt;
+                total_code_len += s.code_len;
+            }
+            eprintln!("{:>10} {:>10}  {}", total_cnt, total_code_len, "total");
         }
     } else {
         let mut m = interp::Machine::new(prog);
