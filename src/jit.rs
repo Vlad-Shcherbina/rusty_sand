@@ -229,30 +229,25 @@ impl State {
                 self.exe_buf.push(Gen::binop(Binop::Cmp, a, 0i64).as_slice());
 
                 // self.arrays[a][b] <- c
+                //    or
+                // lea rax, [a + 2 * a]
+                // mov rcx, self.arrays.ptr
+                // mov rax, [rcx + 8 * rax + VEC_PTR_OFFSET]
+                // mov [rax + 4 * b], c
+                assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
                 self.exe_buf.push(Gen::mov(
                     Mem::base(R64::Rax).index_scale(b, 4),
                     c,
                 ).as_slice());
-
-                // rax <- self.arrays[a].ptr
                 self.exe_buf.push(Gen::mov(
                     R64::Rax,
-                    Mem::base(R64::Rax).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()),
+                    Mem::base(R64::Rcx).index_scale(R64::Rax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()),
                 ).as_slice());
-
-                // rax <- &self.arrays[a]
-                self.exe_buf.push(Gen::binop(Binop::Add,
-                    R64::Rax,
-                    Mem::base(R64::Rbx)
-                        .disp(i32::try_from(
-                            memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()),
+                self.exe_buf.push(Gen::mov(
+                    R64::Rcx,
+                    Mem::base(R64::Rbx).disp(i32::try_from(
+                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()),
                 ).as_slice());
-
-                // rax <- a * 24
-                assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
                 self.exe_buf.push(Gen::lea(R64::Rax, Mem::base(a).index_scale(a, 2)).as_slice());
             }
             opcodes::ADDITION => {
