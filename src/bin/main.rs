@@ -36,14 +36,14 @@ fn main() {
         let start = std::time::Instant::now();
         m.run();
         if show_stats {
-            println!("it took {:.3} s", start.elapsed().as_secs_f64());
+            eprintln!("it took {:.3} s", start.elapsed().as_secs_f64());
         }
     } else {
         let mut m = interp::Machine::new(prog);
         let start = std::time::Instant::now();
         m.run();
         if show_stats {
-            println!("it took {:.3} s", start.elapsed().as_secs_f64());
+            eprintln!("it took {:.3} s", start.elapsed().as_secs_f64());
             let mut num_executed = 0;
             let mut num_modified = 0;
             for s in &m.stats.word_states {
@@ -53,10 +53,10 @@ fn main() {
                     crate::interp::WordState::Modified => num_modified += 1,
                 }
             }
-            dbg!(num_executed);
-            dbg!(num_modified);
+            eprintln!("num_executed = {}", num_executed);
+            eprintln!("num_modified = {}", num_modified);
             m.stats.word_states.clear();
-            println!("{:#?}", m.stats);
+            eprintln!("{:#?}", m.stats);
         }
     }
 }
