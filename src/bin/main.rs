@@ -44,19 +44,9 @@ fn main() {
         m.run();
         if show_stats {
             eprintln!("it took {:.3} s", start.elapsed().as_secs_f64());
-            let mut num_executed = 0;
-            let mut num_modified = 0;
-            for s in &m.stats.word_states {
-                match s {
-                    crate::interp::WordState::Initial => {}
-                    crate::interp::WordState::Executed => num_executed += 1,
-                    crate::interp::WordState::Modified => num_modified += 1,
-                }
+            for (cnt, name) in m.stats.ops.iter().zip(&interp::OPCODE_NAMES) {
+                eprintln!("{:>12}  {}", cnt, name);
             }
-            eprintln!("num_executed = {}", num_executed);
-            eprintln!("num_modified = {}", num_modified);
-            m.stats.word_states.clear();
-            eprintln!("{:#?}", m.stats);
         }
     }
 }

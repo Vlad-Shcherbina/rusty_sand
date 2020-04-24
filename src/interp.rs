@@ -3,11 +3,7 @@ use std::io::{Read, Write};
 
 #[derive(Default, Debug)]
 pub struct Stats {
-    long_jumps: usize,
-    ops: [usize; 16],
-    num_execute_modified: usize,
-    num_modify_executed: usize,
-    pub word_states: Vec<WordState>,
+    pub ops: [usize; 16],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +20,23 @@ pub struct Machine {
     free: Vec<u32>,
     pub stats: Stats,
 }
+
+pub const OPCODE_NAMES: [&str; 14] = [
+    "CMOVE",
+    "ARRAY_INDEX",
+    "ARRAY_AMENDMENT",
+    "ADDITION",
+    "MULTIPLICATION",
+    "DIVISION",
+    "NOT_AND",
+    "HALT",
+    "ALLOCATION",
+    "ABANDONMENT",
+    "OUTPUT",
+    "INPUT",
+    "LOAD_PROGRAM",
+    "ORTHOGRAPHY",
+];
 
 pub mod opcodes {
     pub const CMOVE: u32 = 0;
@@ -70,10 +83,7 @@ pub fn insn_to_string(insn: u32) -> String {
 impl Machine {
     pub fn new(prog: Vec<u32>) -> Self {
         Self {
-            stats: Stats {
-                word_states: vec![WordState::Initial; prog.len()],
-                ..Stats::default()
-            },
+            stats: Stats::default(),
             regs: [0; 8],
             arrays: vec![prog],
             finger: 0,
@@ -83,10 +93,6 @@ impl Machine {
 
     pub fn run(&mut self) {
         loop {
-            if self.stats.word_states[self.finger as usize] == WordState::Modified {
-                self.stats.num_execute_modified += 1;
-            }
-            self.stats.word_states[self.finger as usize] = WordState::Executed;
             let cur = self.arrays[0][self.finger as usize];
             self.finger += 1;
             let op = cur >> 28;
@@ -107,15 +113,8 @@ impl Machine {
                     if regs[c] != 0 { regs[a] = regs[b]; }
                 opcodes::ARRAY_INDEX =>
                     regs[a] = self.arrays[regs[b] as usize][regs[c] as usize],
-                opcodes::ARRAY_AMENDMENT => {
-                    if regs[a] == 0 {
-                        if self.stats.word_states[regs[b] as usize] == WordState::Executed {
-                            self.stats.num_modify_executed += 1;
-                        }
-                        self.stats.word_states[regs[b] as usize] = WordState::Modified;
-                    }
-                    self.arrays[regs[a] as usize][regs[b] as usize] = regs[c];
-                }
+                opcodes::ARRAY_AMENDMENT =>
+                    self.arrays[regs[a] as usize][regs[b] as usize] = regs[c],
                 opcodes::ADDITION => regs[a] = regs[b].wrapping_add(regs[c]),
                 opcodes::MULTIPLICATION => regs[a] = regs[b].wrapping_mul(regs[c]),
                 opcodes::DIVISION => regs[a] = regs[b] / regs[c],
@@ -159,8 +158,6 @@ impl Machine {
                 opcodes::LOAD_PROGRAM => {
                     if regs[b] != 0 {
                         self.arrays[0] = self.arrays[regs[b] as usize].clone();
-                        self.stats.word_states = vec![WordState::Initial; self.arrays[0].len()];
-                        self.stats.long_jumps += 1;
                     }
                     self.finger = regs[c];
                 }
