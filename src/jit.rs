@@ -21,6 +21,7 @@ pub struct State {
     pub finger: u32,
     pub regs: [u32; 8],
     exe_buf: ExeBuf,
+    uncompile_fn_ptr: *const u8,
     jump_locations: Vec<*const u8>,
     arrays: Vec<Vec<u32>>,
     free: Vec<u32>,
@@ -29,11 +30,31 @@ pub struct State {
 
 impl State {
     pub fn new(prog: Vec<u32>) -> State {
+        let mut exe_buf = ExeBuf::reserve(1 << 30);
+
+        // call [rbx].uncompile(rdx)
+        exe_buf.push(Gen::ret().as_slice());
+        for &r in VOLATILE_REGS {
+            if r != R64::Rax && r != R64::Rcx && r != R64::Rdx {
+                exe_buf.push(Gen::pop(r).as_slice());
+            }
+        }
+        exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
+        exe_buf.push(Gen::mov(R64::Rax, State::uncompile as usize as i64).as_slice());
+        exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+        for &r in VOLATILE_REGS.iter().rev() {
+            if r != R64::Rax && r != R64::Rcx && r != R64::Rdx {
+                exe_buf.push(Gen::push(r).as_slice());
+            }
+        }
+        let uncompile_fn_ptr = exe_buf.cur_pos() as *const u8;
+
         let jt = jit_trampoline as usize as *const u8;
         State {
             finger: 0,
             regs: [0; 8],
-            exe_buf: ExeBuf::reserve(1 << 30),
+            uncompile_fn_ptr,
+            exe_buf,
             jump_locations: vec![jt; prog.len()],
             arrays: vec![prog],
             free: vec![],
@@ -198,16 +219,10 @@ impl State {
                 self.exe_buf.push(Gen::mov(R32::Eax, i32::try_from(pos + 1).unwrap()).as_slice());
 
                 // call self.uncompile(b)
-                for &r in VOLATILE_REGS {
-                    self.exe_buf.push(Gen::pop(r).as_slice());
-                }
-                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, State::uncompile as usize as i64).as_slice());
+                self.exe_buf.push(Gen::call(i32::try_from(
+                    self.uncompile_fn_ptr as usize - self.exe_buf.cur_pos() as usize
+                ).unwrap()).as_slice());
                 self.exe_buf.push(Gen::mov(R64::Rdx, b).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
-                for &r in VOLATILE_REGS.iter().rev() {
-                    self.exe_buf.push(Gen::push(r).as_slice());
-                }
 
                 // if jump_targets[b] == jit_trampoline goto skip
                 self.exe_buf.push(Gen::jump_cond(
