@@ -419,25 +419,51 @@ impl RmEncoding {
             Addr::Sib { base, index_scale, disp } => {
                 match index_scale {
                     None => if base as u8 & 7 != 4 {
+                        // TODO: no disp form when disp = 0 and base != Rbp or R13
                         let mut buf = [0; 5];
-                        // TODO: use disp8 and no disp forms when appropriate
-                        buf[..4].copy_from_slice(&disp.to_le_bytes());
-                        Self {
-                            rex_rxb: base as u8 >> 3,
-                            modrm: 0b10_000_000 | (base as u8 & 7),
-                            buf,
-                            buf_len: 4,
+                        match i8::try_from(disp) {
+                            Ok(disp) => {
+                                buf[0] = disp as u8;
+                                Self {
+                                    rex_rxb: base as u8 >> 3,
+                                    modrm: 0b01_000_000 | (base as u8 & 7),
+                                    buf,
+                                    buf_len: 1,
+                                }
+                            }
+                            Err(_) => {
+                                buf[..4].copy_from_slice(&disp.to_le_bytes());
+                                Self {
+                                    rex_rxb: base as u8 >> 3,
+                                    modrm: 0b10_000_000 | (base as u8 & 7),
+                                    buf,
+                                    buf_len: 4,
+                                }
+                            }
                         }
                     } else {
                         let sib = 0b00_100_100;
                         let mut buf = [sib, 0, 0, 0, 0];
-                        buf[1..].copy_from_slice(&disp.to_le_bytes());
-                        // TODO: use disp8 and no disp forms when appropriate
-                        Self {
-                            rex_rxb: base as u8 >> 3,
-                            modrm: 0b10_000_100,
-                            buf,
-                            buf_len: 5,
+                        // TODO: use no disp form when disp = 0
+                        match i8::try_from(disp) {
+                            Ok(disp) => {
+                                buf[1] = disp as u8;
+                                Self {
+                                    rex_rxb: base as u8 >> 3,
+                                    modrm: 0b01_000_100,
+                                    buf,
+                                    buf_len: 2,
+                                }
+                            }
+                            Err(_) => {
+                                buf[1..].copy_from_slice(&disp.to_le_bytes());
+                                Self {
+                                    rex_rxb: base as u8 >> 3,
+                                    modrm: 0b10_000_100,
+                                    buf,
+                                    buf_len: 5,
+                                }
+                            }
                         }
                     }
                     Some((index, scale)) => {
@@ -453,13 +479,26 @@ impl RmEncoding {
                             | ((index as u8 & 7) << 3)
                             | (base as u8 & 7);
                         let mut buf = [sib, 0, 0, 0, 0];
-                        // TODO: use disp8 and no disp forms when appropriate
-                        buf[1..].copy_from_slice(&disp.to_le_bytes());
-                        Self {
-                            rex_rxb: (base as u8 >> 3) | (index as u8 >> 3 << 1),
-                            modrm: 0b10_000_100,
-                            buf,
-                            buf_len: 5,
+                        // TODO: use no disp form when appropriate
+                        match i8::try_from(disp) {
+                            Ok(disp) => {
+                                buf[1] = disp as u8;
+                                Self {
+                                    rex_rxb: (base as u8 >> 3) | (index as u8 >> 3 << 1),
+                                    modrm: 0b01_000_100,
+                                    buf,
+                                    buf_len: 2,
+                                }
+                            }
+                            Err(_) => {
+                                buf[1..].copy_from_slice(&disp.to_le_bytes());
+                                Self {
+                                    rex_rxb: (base as u8 >> 3) | (index as u8 >> 3 << 1),
+                                    modrm: 0b10_000_100,
+                                    buf,
+                                    buf_len: 5,
+                                }
+                            }
                         }
                     }
                 }
