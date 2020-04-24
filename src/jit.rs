@@ -44,7 +44,7 @@ impl State {
 
 #[naked]
 unsafe fn jit_trampoline() {
-    asm!("
+    llvm_asm!("
     // push all win64 volatile registers
     push rax
     push rcx
@@ -100,7 +100,7 @@ extern "win64" fn fail(s: *const std::os::raw::c_char) {
     let s = unsafe { std::ffi::CStr::from_ptr(s) };
     println!("fail: {}", s.to_str().unwrap());
     unsafe {
-        asm!("int3");
+        llvm_asm!("int3");
     }
     std::process::exit(1);
 }
@@ -534,7 +534,7 @@ impl State {
         //
         // r08..r15 -> regs[]
         unsafe {
-            asm!("
+            llvm_asm!("
             call [rsi + 8 * rax]
             "
             :

@@ -1,4 +1,4 @@
-#![feature(asm)]
+#![feature(llvm_asm)]
 #![feature(naked_functions)]
 #![feature(slice_fill)]
 
