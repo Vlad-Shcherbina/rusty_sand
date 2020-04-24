@@ -733,6 +733,19 @@ impl Gen {
     }
 }
 
+impl Gen {
+    pub fn lea(dst: R64, mem: Mem) -> Self {
+        let mut gen = Gen::default();
+        let enc = RmEncoding::from_mem(mem);
+        let rex = enc.rex_rxb | ((dst as u8 & 8) >> 1) | 8 /*w*/;
+        gen.write_u8(0x40 | rex);
+        gen.write_u8(0x8d);
+        gen.write_u8(enc.modrm | ((dst as u8 & 7) << 3));
+        gen.write_slice(&enc.buf[..enc.buf_len]);
+        gen
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum MulOp {
     Mul = 4,
@@ -1264,6 +1277,15 @@ mod tests {
         assert_eq!(insns[3].text, "mov    %dx,0x0(%rax)");
         assert_eq!(insns[4].text, "mov    %edx,0x0(%rax)");
         assert_eq!(insns[5].text, "mov    %rdx,0x0(%rax)");
+    }
+
+    #[test]
+    fn lea() {
+        let mut bytes = Vec::<u8>::new();
+        bytes.extend_from_slice(Gen::lea(R64::R10, Mem::base(R64::R14).disp(0x42)).as_slice());
+        let insns = Obj::from_bytes(&bytes).insns();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].text, "lea    0x42(%r14),%r10");
     }
 
     #[test]

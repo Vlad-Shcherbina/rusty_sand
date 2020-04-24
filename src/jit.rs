@@ -189,9 +189,7 @@ impl State {
                 self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, b).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, b).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, b).as_slice());
+                self.exe_buf.push(Gen::lea(R64::Rax, Mem::base(b).index_scale(b, 2)).as_slice());
             }
             opcodes::ARRAY_AMENDMENT => {
                 // TODO: bounds check
@@ -261,9 +259,7 @@ impl State {
                 self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, R64::Rax).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, a).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R64::Rax, a).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, a).as_slice());
+                self.exe_buf.push(Gen::lea(R64::Rax, Mem::base(a).index_scale(a, 2)).as_slice());
             }
             opcodes::ADDITION => {
                 let a = R32::try_from(8 + a as u8).unwrap();
