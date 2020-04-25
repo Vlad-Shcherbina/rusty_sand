@@ -28,6 +28,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "exe_buf"
+version = "0.1.0"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -137,10 +144,10 @@ dependencies = [
 name = "rusty_sand"
 version = "0.1.0"
 dependencies = [
+ "exe_buf",
  "memoffset",
  "mimalloc",
  "tempfile",
- "winapi",
 ]
 
 [[package]]

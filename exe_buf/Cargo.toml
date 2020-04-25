@@ -1,5 +1,5 @@
 [package]
-name = "rusty_sand"
+name = "exe_buf"
 version = "0.1.0"
 authors = ["Vlad Shcherbina <vlad.shcherbina@gmail.com>"]
 edition = "2018"
@@ -7,13 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tempfile = "*"
-memoffset = "*"
-mimalloc = { version = "*", default-features = false, optional = true }
-exe_buf = { path = "../exe_buf" }
-
-[features]
-clippy = []  # https://github.com/rust-lang/cargo/issues/8075
+winapi = { version = "*", features = ["memoryapi", "sysinfoapi"] }
 
 [lib]
 doctest = false

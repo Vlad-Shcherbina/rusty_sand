@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::convert::TryFrom;
-use crate::exe_buf::ExeBuf;
+use exe_buf::ExeBuf;
 use crate::amd64_gen::{Gen, R32, R64, Binop, Mem, Cond, MulOp};
 use crate::interp::opcodes;
 
