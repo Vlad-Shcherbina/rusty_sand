@@ -11,6 +11,10 @@ pub struct ExeBuf {
 const PAGE_SIZE: usize = 4096;
 
 impl ExeBuf {
+    // On Linux, the memory is only reserved, but no allocated (until used).
+    // However, there is a configurable overcommit check that may kill
+    // the process if it attempts to reserve too much.
+    // https://web.archive.org/web/20110320024917/http://www.ioremap.net/node/125
     pub fn reserve(mut size: usize) -> ExeBuf {
         size += PAGE_SIZE - 1;
         size &= !(PAGE_SIZE - 1);

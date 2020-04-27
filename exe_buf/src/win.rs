@@ -14,6 +14,8 @@ pub struct ExeBuf {
 }
 
 impl ExeBuf {
+    // On Windows, the memory is only reserved, but not allocated (until used).
+    // It's ok to call for example ExeBuf::reserve(1 << 40).
     pub fn reserve(mut size: usize) -> ExeBuf {
         let mut sys_info: winapi::um::sysinfoapi::SYSTEM_INFO = unsafe { std::mem::zeroed() };
         unsafe { winapi::um::sysinfoapi::GetSystemInfo(&mut sys_info); }
