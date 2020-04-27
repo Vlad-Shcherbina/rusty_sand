@@ -1,5 +1,3 @@
-use std::ptr::null_mut;
-
 // Grows backwards because it's more convenient for code generation
 // (most jumps are jumps forward, and when generating the code backwards
 // they are jumps to known locations).
@@ -8,7 +6,6 @@ pub struct ExeBuf {
     reserved_start: *mut u8,
     start: *mut u8,
     end: *mut u8,
-    // page_size_mask: usize,
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -18,12 +15,17 @@ impl ExeBuf {
         size += PAGE_SIZE - 1;
         size &= !(PAGE_SIZE - 1);
 
-        let mut start = null_mut();
+        let mut start = std::ptr::null_mut();
         unsafe {
-            libc::posix_memalign(&mut start, PAGE_SIZE, size);
-            // TODO: error handling
-            libc::mprotect(start, size, libc::PROT_EXEC | libc::PROT_READ | libc::PROT_WRITE);
-            // TODO: error handling
+            let res = libc::posix_memalign(&mut start, PAGE_SIZE, size);
+            match res {
+                0 => {}
+                libc::EINVAL => panic!("posix_memalign: EINVAL"),
+                libc::ENOMEM => panic!("posix_memalign: ENOMEM"),
+                _ => panic!("posix_memalign: {}", res),
+            }
+            let res = libc::mprotect(start, size, libc::PROT_EXEC | libc::PROT_READ | libc::PROT_WRITE);
+            assert_eq!(res, 0, "{}", std::io::Error::last_os_error());
         }
 
         let reserved_start = start as *mut u8;
@@ -48,4 +50,10 @@ impl ExeBuf {
     }
 }
 
-// TODO: drop
+impl Drop for ExeBuf {
+    fn drop(&mut self) {
+        unsafe {
+            libc::free(self.reserved_start as *mut _);
+        }
+    }
+}
