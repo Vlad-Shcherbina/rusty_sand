@@ -1,5 +1,6 @@
 [workspace]
 
 members = [
+    "exe_buf",
     "rusty_sand",
 ]
