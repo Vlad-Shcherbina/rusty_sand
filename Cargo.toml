@@ -4,3 +4,8 @@ members = [
     "exe_buf",
     "rusty_sand",
 ]
+
+# this causes a bug
+[profile.release]
+codegen-units = 1
+lto = true
