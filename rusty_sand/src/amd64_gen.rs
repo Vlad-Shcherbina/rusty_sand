@@ -417,16 +417,17 @@ impl RmEncoding {
                 }
             }
             Addr::Sib { base, index_scale, disp } => {
+                let base = base as u8;
                 match index_scale {
-                    None => if base as u8 & 7 != 4 {
+                    None => if base & 7 != 4 {
                         // TODO: no disp form when disp = 0 and base != Rbp or R13
                         let mut buf = [0; 5];
                         match i8::try_from(disp) {
                             Ok(disp) => {
                                 buf[0] = disp as u8;
                                 Self {
-                                    rex_rxb: base as u8 >> 3,
-                                    modrm: 0b01_000_000 | (base as u8 & 7),
+                                    rex_rxb: base >> 3,
+                                    modrm: 0b01_000_000 | (base & 7),
                                     buf,
                                     buf_len: 1,
                                 }
@@ -434,8 +435,8 @@ impl RmEncoding {
                             Err(_) => {
                                 buf[..4].copy_from_slice(&disp.to_le_bytes());
                                 Self {
-                                    rex_rxb: base as u8 >> 3,
-                                    modrm: 0b10_000_000 | (base as u8 & 7),
+                                    rex_rxb: base >> 3,
+                                    modrm: 0b10_000_000 | (base & 7),
                                     buf,
                                     buf_len: 4,
                                 }
@@ -449,7 +450,7 @@ impl RmEncoding {
                             Ok(disp) => {
                                 buf[1] = disp as u8;
                                 Self {
-                                    rex_rxb: base as u8 >> 3,
+                                    rex_rxb: base >> 3,
                                     modrm: 0b01_000_100,
                                     buf,
                                     buf_len: 2,
@@ -458,7 +459,7 @@ impl RmEncoding {
                             Err(_) => {
                                 buf[1..].copy_from_slice(&disp.to_le_bytes());
                                 Self {
-                                    rex_rxb: base as u8 >> 3,
+                                    rex_rxb: base >> 3,
                                     modrm: 0b10_000_100,
                                     buf,
                                     buf_len: 5,
@@ -468,6 +469,7 @@ impl RmEncoding {
                     }
                     Some((index, scale)) => {
                         assert!(index != R64::Rsp);
+                        let index = index as u8;
                         let scale = match scale {
                             1 => 0,
                             2 => 1,
@@ -476,15 +478,15 @@ impl RmEncoding {
                             _ => panic!("{}", scale),
                         };
                         let sib = (scale << 6)
-                            | ((index as u8 & 7) << 3)
-                            | (base as u8 & 7);
+                            | ((index & 7) << 3)
+                            | (base & 7);
                         let mut buf = [sib, 0, 0, 0, 0];
                         // TODO: use no disp form when appropriate
                         match i8::try_from(disp) {
                             Ok(disp) => {
                                 buf[1] = disp as u8;
                                 Self {
-                                    rex_rxb: (base as u8 >> 3) | (index as u8 >> 3 << 1),
+                                    rex_rxb: (base >> 3) | (index >> 3 << 1),
                                     modrm: 0b01_000_100,
                                     buf,
                                     buf_len: 2,
@@ -493,7 +495,7 @@ impl RmEncoding {
                             Err(_) => {
                                 buf[1..].copy_from_slice(&disp.to_le_bytes());
                                 Self {
-                                    rex_rxb: (base as u8 >> 3) | (index as u8 >> 3 << 1),
+                                    rex_rxb: (base >> 3) | (index >> 3 << 1),
                                     modrm: 0b10_000_100,
                                     buf,
                                     buf_len: 5,
@@ -545,6 +547,7 @@ impl Gen {
     pub fn binop(op: Binop, dst: impl Into<Operand>, src: impl Into<Operand>) -> Gen {
         let src: Operand = src.into();
         let dst: Operand = dst.into();
+        let op = op as u8;
 
         let size_bits = match (src.size_bits(), dst.size_bits()) {
             (Some(s1), Some(s2)) => {
@@ -561,10 +564,10 @@ impl Gen {
             gen.write_u8(0x66);
         }
 
-        let imm8;
-        let imm16;
-        let imm32;
-        let imm_slice;
+        let imm8: [u8; 1];
+        let imm16: [u8; 2];
+        let imm32: [u8; 4];
+        let imm_slice: &[u8];
 
         let reg;
         let rm;
@@ -572,30 +575,30 @@ impl Gen {
         match (dst, src) {
             (dst, Operand::Imm8(imm)) => {
                 rm = dst;
-                reg = op as u8;
+                reg = op;
                 opcode = 0x80;
-                imm8 = imm as u8;
-                imm_slice = std::slice::from_ref(&imm8);
+                imm8 = imm.to_le_bytes();
+                imm_slice = &imm8;
             }
             (dst, Operand::Imm16(imm)) => {
                 rm = dst;
-                reg = op as u8;
+                reg = op;
                 opcode = 0x81;
-                imm16 = (imm as u16).to_le_bytes();
+                imm16 = imm.to_le_bytes();
                 imm_slice = &imm16;
             }
             (dst, Operand::Imm32(imm)) => {
                 rm = dst;
-                reg = op as u8;
+                reg = op;
                 opcode = 0x81;
-                imm32 = (imm as u32).to_le_bytes();
+                imm32 = imm.to_le_bytes();
                 imm_slice = &imm32;
             }
             (dst, Operand::Imm64(imm)) => {
                 rm = dst;
-                reg = op as u8;
+                reg = op;
                 opcode = 0x81;
-                imm32 = (i32::try_from(imm).unwrap() as u32).to_le_bytes();
+                imm32 = i32::try_from(imm).unwrap().to_le_bytes();
                 imm_slice = &imm32;
             }
             (_, Operand::Mem(_)) => {
@@ -608,8 +611,8 @@ impl Gen {
                 };
                 rm = src;
                 opcode = match size_bits {
-                    8 => op as u8 * 8 + 2,
-                    16 | 32 | 64 => op as u8 * 8 + 3,
+                    8 => op * 8 + 2,
+                    16 | 32 | 64 => op * 8 + 3,
                     _ => unreachable!(),
                 };
                 imm_slice = &[];
@@ -624,8 +627,8 @@ impl Gen {
                 };
                 rm = dst;
                 opcode = match size_bits {
-                    8 => op as u8 * 8,
-                    16 | 32 | 64 => op as u8 * 8 + 1,
+                    8 => op * 8,
+                    16 | 32 | 64 => op * 8 + 1,
                     _ => unreachable!(),
                 };
                 imm_slice = &[];
@@ -672,10 +675,10 @@ impl Gen {
             gen.write_u8(0x66);
         }
 
-        let imm8;
-        let imm16;
-        let imm32;
-        let imm_slice;
+        let imm8: [u8; 1];
+        let imm16: [u8; 2];
+        let imm32: [u8; 4];
+        let imm_slice: &[u8];
 
         let reg;
         let enc;
@@ -689,21 +692,21 @@ impl Gen {
                 enc = RmEncoding::from_reg_or_mem(dst);
                 reg = 0;
                 opcode = 0xc6;
-                imm8 = imm as u8;
-                imm_slice = std::slice::from_ref(&imm8);
+                imm8 = imm.to_le_bytes();
+                imm_slice = &imm8;
             }
             (dst, Operand::Imm16(imm)) => {
                 enc = RmEncoding::from_reg_or_mem(dst);
                 reg = 0;
                 opcode = 0xc7;
-                imm16 = (imm as u16).to_le_bytes();
+                imm16 = imm.to_le_bytes();
                 imm_slice = &imm16;
             }
             (dst, Operand::Imm32(imm)) => {
                 enc = RmEncoding::from_reg_or_mem(dst);
                 reg = 0;
                 opcode = 0xc7;
-                imm32 = (imm as u32).to_le_bytes();
+                imm32 = imm.to_le_bytes();
                 imm_slice = &imm32;
             }
             (dst, Operand::Imm64(imm)) => {
@@ -717,7 +720,7 @@ impl Gen {
                 enc = RmEncoding::from_reg_or_mem(dst);
                 reg = 0;
                 opcode = 0xc7;
-                imm32 = (i32::try_from(imm).unwrap() as u32).to_le_bytes();
+                imm32 = i32::try_from(imm).unwrap().to_le_bytes();
                 imm_slice = &imm32;
             }
             (_, Operand::Mem(src)) => {

@@ -164,14 +164,14 @@ impl State {
             self.stats.ops[op as usize].code_len += end_ptr as usize - self.exe_buf.cur_pos() as usize;
             return;
         }
-        let a = ((insn >> 6) & 7) as usize;
-        let b = ((insn >> 3) & 7) as usize;
-        let c = (insn & 7) as usize;
+        let a = ((insn >> 6) & 7) as u8;
+        let b = ((insn >> 3) & 7) as u8;
+        let c = (insn & 7) as u8;
         match op {
             opcodes::CMOVE => {
-                let a = R32::try_from(8 + a as u8).unwrap();
-                let b = R32::try_from(8 + b as u8).unwrap();
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let a = R32::try_from(8 + a).unwrap();
+                let b = R32::try_from(8 + b).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
                 let skip = self.exe_buf.cur_pos();
                 self.exe_buf.push(Gen::mov(a, b).as_slice());
                 self.exe_buf.push(Gen::jump_cond(Cond::E,
@@ -181,9 +181,9 @@ impl State {
             }
             opcodes::ARRAY_INDEX => {
                 // TODO: bounds check
-                let a = R32::try_from(8 + a as u8).unwrap();
-                let b = R64::try_from(8 + b as u8).unwrap();
-                let c = R64::try_from(8 + c as u8).unwrap();
+                let a = R32::try_from(8 + a).unwrap();
+                let b = R64::try_from(8 + b).unwrap();
+                let c = R64::try_from(8 + c).unwrap();
 
                 // lea rax, [b + 2 * b]
                 // mov rcx, self.arrays.ptr
@@ -208,9 +208,9 @@ impl State {
             }
             opcodes::ARRAY_AMENDMENT => {
                 // TODO: bounds check
-                let a = R64::try_from(8 + a as u8).unwrap();
-                let b = R64::try_from(8 + b as u8).unwrap();
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let a = R64::try_from(8 + a).unwrap();
+                let b = R64::try_from(8 + b).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
 
                 let skip = self.exe_buf.cur_pos();
 
@@ -266,17 +266,17 @@ impl State {
                 self.exe_buf.push(Gen::lea(R64::Rax, Mem::base(a).index_scale(a, 2)).as_slice());
             }
             opcodes::ADDITION => {
-                let a = R32::try_from(8 + a as u8).unwrap();
-                let b = R32::try_from(8 + b as u8).unwrap();
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let a = R32::try_from(8 + a).unwrap();
+                let b = R32::try_from(8 + b).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
                 self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Add, R32::Eax, c).as_slice());
                 self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
             }
             opcodes::MULTIPLICATION => {
-                let a = R32::try_from(8 + a as u8).unwrap();
-                let b = R32::try_from(8 + b as u8).unwrap();
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let a = R32::try_from(8 + a).unwrap();
+                let b = R32::try_from(8 + b).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
                 self.exe_buf.push(Gen::pop(R64::Rdx).as_slice());
                 self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
                 self.exe_buf.push(Gen::mul_op(MulOp::Mul, c).as_slice());
@@ -285,9 +285,9 @@ impl State {
             }
             opcodes::DIVISION => {
                 // TODO: maybe explicitly fail on division by zero?
-                let a = R32::try_from(8 + a as u8).unwrap();
-                let b = R32::try_from(8 + b as u8).unwrap();
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let a = R32::try_from(8 + a).unwrap();
+                let b = R32::try_from(8 + b).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
                 self.exe_buf.push(Gen::pop(R64::Rdx).as_slice());
                 self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
                 self.exe_buf.push(Gen::mul_op(MulOp::Div, c).as_slice());
@@ -296,9 +296,9 @@ impl State {
                 self.exe_buf.push(Gen::push(R64::Rdx).as_slice());
             }
             opcodes::NOT_AND => {
-                let a = R32::try_from(8 + a as u8).unwrap();
-                let b = R32::try_from(8 + b as u8).unwrap();
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let a = R32::try_from(8 + a).unwrap();
+                let b = R32::try_from(8 + b).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
                 self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::Xor, R32::Eax, -1i32).as_slice());
                 self.exe_buf.push(Gen::binop(Binop::And, R32::Eax, c).as_slice());
@@ -329,8 +329,8 @@ impl State {
                 self.exe_buf.push(t.as_slice());
             }
             opcodes::ALLOCATION => {
-                let c = R32::try_from(8 + c as u8).unwrap();
-                let b = R32::try_from(8 + b as u8).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
+                let b = R32::try_from(8 + b).unwrap();
 
                 // b <- call self.allocation(c)
                 self.exe_buf.push(Gen::mov(b, R32::Eax).as_slice());
@@ -354,7 +354,7 @@ impl State {
                 }
             }
             opcodes::ABANDONMENT => {
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
                 for &r in VOLATILE_REGS {
                     self.exe_buf.push(Gen::pop(r).as_slice());
                 }
@@ -367,7 +367,7 @@ impl State {
                 }
             }
             opcodes::OUTPUT => {
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
                 for &r in VOLATILE_REGS {
                     self.exe_buf.push(Gen::pop(r).as_slice());
                 }
@@ -379,7 +379,7 @@ impl State {
                 }
             }
             opcodes::INPUT => {
-                let c = R32::try_from(8 + c as u8).unwrap();
+                let c = R32::try_from(8 + c).unwrap();
                 self.exe_buf.push(Gen::mov(c, R32::Eax).as_slice());
                 for &r in VOLATILE_REGS {
                     if r != R64::Rax {
@@ -401,8 +401,8 @@ impl State {
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
-                let c = R64::try_from(8 + c as u8).unwrap();
-                let b = R64::try_from(8 + b as u8).unwrap();
+                let c = R64::try_from(8 + c).unwrap();
+                let b = R64::try_from(8 + b).unwrap();
 
                 self.exe_buf.push(Gen::jump_indirect(Mem::base(R64::Rsi).index_scale(c, 8)).as_slice());
                 self.exe_buf.push(Gen::mov(R64::Rax, c).as_slice());
@@ -830,7 +830,7 @@ mod tests {
     fn output() {
         let mut code = Vec::<u32>::new();
         for &c in b"hello, world!\n" {
-            code.push(opcodes::ORTHOGRAPHY << 28 | 3 << 25 | c as u32);
+            code.push(opcodes::ORTHOGRAPHY << 28 | 3 << 25 | u32::from(c));
             code.push(opcodes::OUTPUT << 28 | 0o003);
         }
         code.push(opcodes::HALT << 28);
