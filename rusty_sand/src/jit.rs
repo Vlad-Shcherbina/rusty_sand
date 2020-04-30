@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::convert::TryFrom;
 use exe_buf::ExeBuf;
-use crate::amd64_gen::{Gen, R32, R64, Binop, Mem, Cond, MulOp};
+use amd64_gen::{Gen, R32, R64, Binop, Mem, Cond, MulOp};
 use crate::interp::opcodes;
 
 #[derive(Default)]

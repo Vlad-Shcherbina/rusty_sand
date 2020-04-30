@@ -3,5 +3,6 @@
 members = [
     "exe_buf",
     "binutils",
+    "amd64_gen",
     "rusty_sand",
 ]

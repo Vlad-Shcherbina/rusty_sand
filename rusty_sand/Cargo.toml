@@ -10,9 +10,7 @@ edition = "2018"
 memoffset = "*"
 mimalloc = { version = "*", default-features = false, optional = true }
 exe_buf = { path = "../exe_buf" }
-
-[dev-dependencies]
-binutils = { path = "../binutils" }
+amd64_gen = { path = "../amd64_gen" }
 
 [features]
 clippy = []  # https://github.com/rust-lang/cargo/issues/8075
