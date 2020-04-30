@@ -8,3 +8,9 @@ edition = "2018"
 
 [dependencies]
 tempfile = "*"
+
+[features]
+clippy = []  # https://github.com/rust-lang/cargo/issues/8075
+
+[lib]
+doctest = false

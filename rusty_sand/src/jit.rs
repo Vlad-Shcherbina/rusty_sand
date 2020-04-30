@@ -578,8 +578,9 @@ mod tests {
     fn check_vec_layout<T: Clone>(elem: T) {
         let mut xs = Vec::<T>::with_capacity(10);
         xs.push(elem.clone());
-        xs.push(elem.clone());
+        xs.push(elem);
         let ptr = &xs as *const _ as *const u8;
+        #[allow(clippy::cast_ptr_alignment)]
         unsafe {
             assert_eq!((ptr.add(VEC_PTR_OFFSET) as *const u64).read(), &xs[0] as *const _ as u64);
             assert_eq!((ptr.add(VEC_CAPACITY_OFFSET) as *const u64).read(), 10);
