@@ -1091,7 +1091,7 @@ mod tests {
             let mut expected = Vec::new();
             for r2 in R8::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
-                expected.push(format!("add    %{},%{}", r2, r1));
+                expected.push(format!("add    {},{}", r1, r2));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -1108,7 +1108,7 @@ mod tests {
             let mut expected = Vec::new();
             for r2 in R16::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
-                expected.push(format!("add    %{},%{}", r2, r1));
+                expected.push(format!("add    {},{}", r1, r2));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -1125,7 +1125,7 @@ mod tests {
             let mut expected = Vec::new();
             for r2 in R32::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
-                expected.push(format!("add    %{},%{}", r2, r1));
+                expected.push(format!("add    {},{}", r1, r2));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -1142,7 +1142,7 @@ mod tests {
             let mut expected = Vec::new();
             for r2 in R64::all() {
                 bytes.extend_from_slice(Gen::binop(Binop::Add, r1, r2).as_slice());
-                expected.push(format!("add    %{},%{}", r2, r1));
+                expected.push(format!("add    {},{}", r1, r2));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -1162,7 +1162,7 @@ mod tests {
             binop_name.make_ascii_lowercase();
 
             bytes.extend_from_slice(Gen::binop(binop, R32::Ebx, R32::Ecx).as_slice());
-            expected.push(format!("{:3}    %ecx,%ebx", binop_name));
+            expected.push(format!("{:3}    ebx,ecx", binop_name));
         }
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), expected.len());
@@ -1175,19 +1175,19 @@ mod tests {
     fn binop_imm() {
         let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R8::Bl, 0x42i8).as_slice()).insns();
         assert_eq!(insns.len(), 1);
-        assert_eq!(insns[0].text, "adc    $0x42,%bl");
+        assert_eq!(insns[0].text, "adc    bl,0x42");
 
         let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R16::Bx, 0x42i16).as_slice()).insns();
         assert_eq!(insns.len(), 1);
-        assert_eq!(insns[0].text, "adc    $0x42,%bx");
+        assert_eq!(insns[0].text, "adc    bx,0x42");
 
         let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R32::Ebx, 0x42i32).as_slice()).insns();
         assert_eq!(insns.len(), 1);
-        assert_eq!(insns[0].text, "adc    $0x42,%ebx");
+        assert_eq!(insns[0].text, "adc    ebx,0x42");
 
         let insns = Obj::from_bytes(Gen::binop(Binop::Adc, R64::Rbx, 0x42i64).as_slice()).insns();
         assert_eq!(insns.len(), 1);
-        assert_eq!(insns[0].text, "adc    $0x42,%rbx");
+        assert_eq!(insns[0].text, "adc    rbx,0x42");
     }
 
     #[test]
@@ -1203,10 +1203,10 @@ mod tests {
             Gen::binop(Binop::Adc, Mem::rip_rel(0x42), R64::Rdx).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 4);
-        assert_eq!(insns[0].text, "adc    %dl,0x42(%rip)");
-        assert_eq!(insns[1].text, "adc    %dx,0x42(%rip)");
-        assert_eq!(insns[2].text, "adc    %edx,0x42(%rip)");
-        assert_eq!(insns[3].text, "adc    %rdx,0x42(%rip)");
+        assert_eq!(insns[0].text, "adc    BYTE PTR [rip+0x42],dl");
+        assert_eq!(insns[1].text, "adc    WORD PTR [rip+0x42],dx");
+        assert_eq!(insns[2].text, "adc    DWORD PTR [rip+0x42],edx");
+        assert_eq!(insns[3].text, "adc    QWORD PTR [rip+0x42],rdx");
     }
 
     #[test]
@@ -1222,10 +1222,10 @@ mod tests {
             Gen::binop(Binop::Add, R32::Edx, Mem::base(R64::Rcx)).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 4);
-        assert_eq!(insns[0].text, "add    %dl,0x0(%rcx)");
-        assert_eq!(insns[1].text, "add    0x0(%rcx),%dl");
-        assert_eq!(insns[2].text, "add    %edx,0x0(%rcx)");
-        assert_eq!(insns[3].text, "add    0x0(%rcx),%edx");
+        assert_eq!(insns[0].text, "add    BYTE PTR [rcx+0x0],dl");
+        assert_eq!(insns[1].text, "add    dl,BYTE PTR [rcx+0x0]");
+        assert_eq!(insns[2].text, "add    DWORD PTR [rcx+0x0],edx");
+        assert_eq!(insns[3].text, "add    edx,DWORD PTR [rcx+0x0]");
     }
 
     #[test]
@@ -1234,7 +1234,7 @@ mod tests {
         let mut expected = Vec::new();
         for r in R64::all() {
             bytes.extend_from_slice(Gen::binop(Binop::Add, Mem::base(r), R32::Eax).as_slice());
-            expected.push(format!("add    %eax,0x0(%{})", r));
+            expected.push(format!("add    DWORD PTR [{}+0x0],eax", r));
         }
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), expected.len());
@@ -1254,7 +1254,7 @@ mod tests {
                 }
                 bytes.extend_from_slice(
                     Gen::binop(Binop::Add, Mem::base(base).index_scale(index, 4).disp(0x42), R32::Eax).as_slice());
-                expected.push(format!("add    %eax,0x42(%{},%{},4)", base, index));
+                expected.push(format!("add    DWORD PTR [{}+{}*4+0x42],eax", base, index));
             }
             let insns = Obj::from_bytes(&bytes).insns();
             assert_eq!(insns.len(), expected.len());
@@ -1275,12 +1275,12 @@ mod tests {
         bytes.extend_from_slice(Gen::mov(R64::R11, 0xaabbccddeei64).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 6);
-        assert_eq!(insns[0].text, "mov    $0x42,%dl");
-        assert_eq!(insns[1].text, "mov    $0x42,%dx");
-        assert_eq!(insns[2].text, "mov    $0x42,%edx");
-        assert_eq!(insns[3].text, "mov    $0x42,%rdx");
-        assert_eq!(insns[4].text, "movabs $0xaabbccddee,%rdx");
-        assert_eq!(insns[5].text, "movabs $0xaabbccddee,%r11");
+        assert_eq!(insns[0].text, "mov    dl,0x42");
+        assert_eq!(insns[1].text, "mov    dx,0x42");
+        assert_eq!(insns[2].text, "mov    edx,0x42");
+        assert_eq!(insns[3].text, "mov    rdx,0x42");
+        assert_eq!(insns[4].text, "movabs rdx,0xaabbccddee");
+        assert_eq!(insns[5].text, "movabs r11,0xaabbccddee");
     }
 
     #[test]
@@ -1294,12 +1294,12 @@ mod tests {
         bytes.extend_from_slice(Gen::mov(R64::Rdx, Mem::base(R64::Rax)).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 6);
-        assert_eq!(insns[0].text, "mov    %al,%dl");
-        assert_eq!(insns[1].text, "mov    %ax,%dx");
-        assert_eq!(insns[2].text, "mov    0x0(%rax),%dl");
-        assert_eq!(insns[3].text, "mov    0x0(%rax),%dx");
-        assert_eq!(insns[4].text, "mov    0x0(%rax),%edx");
-        assert_eq!(insns[5].text, "mov    0x0(%rax),%rdx");
+        assert_eq!(insns[0].text, "mov    dl,al");
+        assert_eq!(insns[1].text, "mov    dx,ax");
+        assert_eq!(insns[2].text, "mov    dl,BYTE PTR [rax+0x0]");
+        assert_eq!(insns[3].text, "mov    dx,WORD PTR [rax+0x0]");
+        assert_eq!(insns[4].text, "mov    edx,DWORD PTR [rax+0x0]");
+        assert_eq!(insns[5].text, "mov    rdx,QWORD PTR [rax+0x0]");
     }
 
     #[test]
@@ -1313,12 +1313,12 @@ mod tests {
         bytes.extend_from_slice(Gen::mov(Mem::base(R64::Rax), R64::Rdx).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 6);
-        assert_eq!(insns[0].text, "mov    %dl,%al");
-        assert_eq!(insns[1].text, "mov    %dx,%ax");
-        assert_eq!(insns[2].text, "mov    %dl,0x0(%rax)");
-        assert_eq!(insns[3].text, "mov    %dx,0x0(%rax)");
-        assert_eq!(insns[4].text, "mov    %edx,0x0(%rax)");
-        assert_eq!(insns[5].text, "mov    %rdx,0x0(%rax)");
+        assert_eq!(insns[0].text, "mov    al,dl");
+        assert_eq!(insns[1].text, "mov    ax,dx");
+        assert_eq!(insns[2].text, "mov    BYTE PTR [rax+0x0],dl");
+        assert_eq!(insns[3].text, "mov    WORD PTR [rax+0x0],dx");
+        assert_eq!(insns[4].text, "mov    DWORD PTR [rax+0x0],edx");
+        assert_eq!(insns[5].text, "mov    QWORD PTR [rax+0x0],rdx");
     }
 
     #[test]
@@ -1327,7 +1327,7 @@ mod tests {
         bytes.extend_from_slice(Gen::lea(R64::R10, Mem::base(R64::R14).disp(0x42)).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 1);
-        assert_eq!(insns[0].text, "lea    0x42(%r14),%r10");
+        assert_eq!(insns[0].text, "lea    r10,[r14+0x42]");
     }
 
     #[test]
@@ -1339,10 +1339,10 @@ mod tests {
         bytes.extend_from_slice(Gen::mul_op(MulOp::Idiv, R64::Rcx).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 4);
-        assert_eq!(insns[0].text, "mul    %cl");
-        assert_eq!(insns[1].text, "imul   %cx");
-        assert_eq!(insns[2].text, "div    %ecx");
-        assert_eq!(insns[3].text, "idiv   %rcx");
+        assert_eq!(insns[0].text, "mul    cl");
+        assert_eq!(insns[1].text, "imul   cx");
+        assert_eq!(insns[2].text, "div    ecx");
+        assert_eq!(insns[3].text, "idiv   rcx");
     }
 
     #[test]
@@ -1356,12 +1356,12 @@ mod tests {
         bytes.extend_from_slice(Gen::push(Mem::base(R64::Rax).size(64)).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 6);
-        assert_eq!(insns[0].text, "push   %bx");
-        assert_eq!(insns[1].text, "push   %r9w");
-        assert_eq!(insns[2].text, "pushw  0x0(%rax)");
-        assert_eq!(insns[3].text, "push   %rbx");
-        assert_eq!(insns[4].text, "push   %r9");
-        assert_eq!(insns[5].text, "pushq  0x0(%rax)");
+        assert_eq!(insns[0].text, "push   bx");
+        assert_eq!(insns[1].text, "push   r9w");
+        assert_eq!(insns[2].text, "push   WORD PTR [rax+0x0]");
+        assert_eq!(insns[3].text, "push   rbx");
+        assert_eq!(insns[4].text, "push   r9");
+        assert_eq!(insns[5].text, "push   QWORD PTR [rax+0x0]");
     }
 
     #[test]
@@ -1375,12 +1375,12 @@ mod tests {
         bytes.extend_from_slice(Gen::pop(Mem::base(R64::Rax).size(64)).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 6);
-        assert_eq!(insns[0].text, "pop    %bx");
-        assert_eq!(insns[1].text, "pop    %r9w");
-        assert_eq!(insns[2].text, "popw   0x0(%rax)");
-        assert_eq!(insns[3].text, "pop    %rbx");
-        assert_eq!(insns[4].text, "pop    %r9");
-        assert_eq!(insns[5].text, "popq   0x0(%rax)");
+        assert_eq!(insns[0].text, "pop    bx");
+        assert_eq!(insns[1].text, "pop    r9w");
+        assert_eq!(insns[2].text, "pop    WORD PTR [rax+0x0]");
+        assert_eq!(insns[3].text, "pop    rbx");
+        assert_eq!(insns[4].text, "pop    r9");
+        assert_eq!(insns[5].text, "pop    QWORD PTR [rax+0x0]");
     }
 
     #[test]
@@ -1391,14 +1391,14 @@ mod tests {
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 2);
         assert_eq!(insns[0].text, "jmp    0x0");
-        assert_eq!(insns[1].text, "jmpq   0x2");
+        assert_eq!(insns[1].text, "jmp    0x2");
     }
 
     #[test]
     fn call() {
         let insns = Obj::from_bytes(Gen::call(-5).as_slice()).insns();
         assert_eq!(insns.len(), 1);
-        assert_eq!(insns[0].text, "callq  0x0");
+        assert_eq!(insns[0].text, "call   0x0");
     }
 
     #[test]
@@ -1425,15 +1425,15 @@ mod tests {
         let mut bytes = Vec::<u8>::new();
         let mut expected = Vec::new();
         for &(target, target_str) in &[
-            (IndirectJumpTarget::Reg(R64::Rax), "%rax"),
-            (IndirectJumpTarget::Reg(R64::R9), "%r9"),
-            (IndirectJumpTarget::Mem(Mem::rip_rel(0x42)), "0x42(%rip)"),
+            (IndirectJumpTarget::Reg(R64::Rax), "rax"),
+            (IndirectJumpTarget::Reg(R64::R9), "r9"),
+            (IndirectJumpTarget::Mem(Mem::rip_rel(0x42)), "QWORD PTR [rip+0x42]"),
             (IndirectJumpTarget::Mem(
                 Mem::base(R64::Rbx).index_scale(R64::Rdx, 2).disp(0x42)),
-             "0x42(%rbx,%rdx,2)"),
+             "QWORD PTR [rbx+rdx*2+0x42]"),
         ] {
             bytes.extend_from_slice(Gen::jump_indirect(target).as_slice());
-            expected.push(format!("jmpq   *{}", target_str));
+            expected.push(format!("jmp    {}", target_str));
         }
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), expected.len());
@@ -1447,15 +1447,15 @@ mod tests {
         let mut bytes = Vec::<u8>::new();
         let mut expected = Vec::new();
         for &(target, target_str) in &[
-            (IndirectJumpTarget::Reg(R64::Rax), "%rax"),
-            (IndirectJumpTarget::Reg(R64::R9), "%r9"),
-            (IndirectJumpTarget::Mem(Mem::rip_rel(0x42)), "0x42(%rip)"),
+            (IndirectJumpTarget::Reg(R64::Rax), "rax"),
+            (IndirectJumpTarget::Reg(R64::R9), "r9"),
+            (IndirectJumpTarget::Mem(Mem::rip_rel(0x42)), "QWORD PTR [rip+0x42]"),
             (IndirectJumpTarget::Mem(
                 Mem::base(R64::Rbx).index_scale(R64::Rdx, 2).disp(0x42)),
-             "0x42(%rbx,%rdx,2)"),
+             "QWORD PTR [rbx+rdx*2+0x42]"),
         ] {
             bytes.extend_from_slice(Gen::call_indirect(target).as_slice());
-            expected.push(format!("callq  *{}", target_str));
+            expected.push(format!("call   {}", target_str));
         }
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), expected.len());
@@ -1471,7 +1471,7 @@ mod tests {
         bytes.extend_from_slice(Gen::retn(0x9999).as_slice());
         let insns = Obj::from_bytes(&bytes).insns();
         assert_eq!(insns.len(), 2);
-        assert_eq!(insns[0].text, "retq");
-        assert_eq!(insns[1].text, "retq   $0x9999");
+        assert_eq!(insns[0].text, "ret");
+        assert_eq!(insns[1].text, "ret    0x9999");
     }
 }

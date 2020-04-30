@@ -41,7 +41,7 @@ impl Obj {
 
     pub fn insns(self) -> Vec<Insn> {
         let p = Command::new("bash")
-            .args(&["-c", &format!("objdump -d --insn-width=15 {}", self.filename())])
+            .args(&["-c", &format!("objdump -d --insn-width=15 {} -M intel", self.filename())])
             .stdout(Stdio::piped())
             .spawn().unwrap();
         let res = p.wait_with_output().unwrap();
@@ -56,7 +56,10 @@ impl Obj {
 fn invoke_gas(obj_filename: &str) -> std::process::Child {
     // explicitly calling bash to ensure it also works on Windows with WSL
     Command::new("bash")
-        .args(&["-c", &format!("as --64 --strip-local-absolute -o {}", obj_filename)])
+        .args(&[
+            "-c",
+            &format!("as --64 -msyntax=intel -mnaked-reg --strip-local-absolute -o {}", obj_filename),
+        ])
         .stdin(Stdio::piped())
         .spawn().unwrap()
 }
@@ -108,9 +111,9 @@ mod tests {
 
     #[test]
     fn asm() {
-        let insns = Obj::from_asm("mov %eax, %ebx \n nop \n").insns();
+        let insns = Obj::from_asm("mov ebx, eax \n nop \n").insns();
         assert_eq!(insns.len(), 2);
-        assert_eq!(insns[0].text, "mov    %eax,%ebx");
+        assert_eq!(insns[0].text, "mov    ebx,eax");
         assert_eq!(insns[1].text, "nop");
     }
 
@@ -118,7 +121,7 @@ mod tests {
     fn bytes() {
         let insns = Obj::from_bytes(&[0x89, 0xc3, 0x90]).insns();
         assert_eq!(insns, [
-            Insn { bytes: vec![0x89, 0xc3], text: "mov    %eax,%ebx".to_string(), comment: String::new() },
+            Insn { bytes: vec![0x89, 0xc3], text: "mov    ebx,eax".to_string(), comment: String::new() },
             Insn { bytes: vec![0x90], text: "nop".to_string(), comment: String::new() },
         ]);
     }
