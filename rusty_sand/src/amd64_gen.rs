@@ -1082,7 +1082,7 @@ impl Gen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binutils::Obj;
+    use binutils::Obj;
 
     #[test]
     fn add_r8_r8() {

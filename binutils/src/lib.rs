@@ -1,6 +1,8 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+mod util;
+
 pub struct Obj(tempfile::NamedTempFile);
 
 impl Obj {

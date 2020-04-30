@@ -2,5 +2,6 @@
 
 members = [
     "exe_buf",
+    "binutils",
     "rusty_sand",
 ]
