@@ -90,6 +90,12 @@ pub fn mov64_imm(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, imm: i32) {
     sink.prepend(&[rex | 0x48, 0xc7]);
 }
 
+pub fn movabs64_imm(sink: &mut impl CodeSink, r: Reg, imm: i64) {
+    let r = r as u8;
+    sink.prepend(&imm.to_le_bytes());
+    sink.prepend(&[0x48 | r >> 3, 0xb8 | r & 7]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,6 +227,17 @@ mod tests {
             (b"\x48\xc7\xc2\xfe\xff\xff\xff",                 "mov    rdx,0xfffffffffffffffe"),
             (b"\x41\xc7\x83\x00\x00\x00\x00\x42\x00\x00\x00", "mov    DWORD PTR [r11+0x0],0x42"),
             (b"\x41\xc7\xc1\x42\x00\x00\x00",                 "mov    r9d,0x42"),
+        ]);
+    }
+
+    #[test]
+    fn movabs() {
+        let mut code = Vec::<u8>::new();
+        gen::movabs64_imm(&mut code, Reg::Bx, 0x1234567890);
+        gen::movabs64_imm(&mut code, Reg::R9, 0x1234567890);
+        expect_disasm(&code, &[
+            (b"\x49\xb9\x90\x78\x56\x34\x12\x00\x00\x00", "movabs r9,0x1234567890"),
+            (b"\x48\xbb\x90\x78\x56\x34\x12\x00\x00\x00", "movabs rbx,0x1234567890"),
         ]);
     }
 
