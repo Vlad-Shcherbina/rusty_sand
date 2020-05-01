@@ -56,19 +56,21 @@ impl State {
 
         // call [rbx].uncompile(rdx)
         gen::ret(&mut exe_buf);
-        for &r in VOLATILE_REGS {  // TODO: unroll
-            if r != Reg::Ax && r != Reg::Cx && r != Reg::Dx {
-                gen::pop64(&mut exe_buf, r);
-            }
-        }
+
+        gen::pop64(&mut exe_buf, Reg::R8);
+        gen::pop64(&mut exe_buf, Reg::R9);
+        gen::pop64(&mut exe_buf, Reg::R10);
+        gen::pop64(&mut exe_buf, Reg::R11);
+
         gen::call_indirect(&mut exe_buf, Reg::Ax);
         gen::movabs64_imm(&mut exe_buf, Reg::Ax, State::uncompile as usize as i64);
         gen::mov64_r_rm(&mut exe_buf, Reg::Cx, Reg::Bx);
-        for &r in VOLATILE_REGS.iter().rev() {
-            if r != Reg::Ax && r != Reg::Cx && r != Reg::Dx {
-                gen::push64(&mut exe_buf, r);
-            }
-        }
+
+        gen::push64(&mut exe_buf, Reg::R11);
+        gen::push64(&mut exe_buf, Reg::R10);
+        gen::push64(&mut exe_buf, Reg::R9);
+        gen::push64(&mut exe_buf, Reg::R8);
+
         let uncompile_fn_ptr = exe_buf.cur_pos() as *const u8;
 
         let jt = jit_trampoline as usize as *const u8;
@@ -90,8 +92,8 @@ unsafe fn jit_trampoline() {
     llvm_asm!("
     // push all win64 volatile registers
     push rax
-    push rcx
-    push rdx
+    //push rcx
+    //push rdx
     push r8
     push r9
     push r10
@@ -108,8 +110,8 @@ unsafe fn jit_trampoline() {
     pop r10
     pop r9
     pop r8
-    pop rdx
-    pop rcx
+    //pop rdx
+    //pop rcx
     pop rax
 
     // resume execution of the compiled code
@@ -164,10 +166,6 @@ fn is_fallthrough(cmd: u32) -> bool {
 const VEC_PTR_OFFSET: usize = 0;
 #[cfg(test)] const VEC_CAPACITY_OFFSET: usize = 8;
 const VEC_LEN_OFFSET: usize = 16;
-
-/// Registers that should be saved by the caller in the win64 calling convention.
-const VOLATILE_REGS: &[Reg] = &[Reg::Ax, Reg::Cx, Reg::Dx, Reg::R8, Reg::R9, Reg::R10, Reg::R11];
-
 
 impl State {
     fn compile_insn(&mut self, pos: usize) {
@@ -297,66 +295,76 @@ impl State {
             opcodes::ALLOCATION => {
                 // b <- call self.allocation(c)
                 gen::mov32_r_rm(buf, b, Reg::Ax);
-                for &r in VOLATILE_REGS {
-                    if r != Reg::Ax {
-                        gen::pop64(buf, r);
-                    } else {
-                        gen::binop64_imm(buf, Binop::Add, Reg::Sp, 8);
-                    }
-                }
+
+                gen::pop64(buf, Reg::R8);
+                gen::pop64(buf, Reg::R9);
+                gen::pop64(buf, Reg::R10);
+                gen::pop64(buf, Reg::R11);
+                gen::pop64(buf, Reg::R11);  // to align RSP to 16
+
                 gen::call_indirect(buf, Reg::Ax);
                 gen::movabs64_imm(buf, Reg::Ax, State::allocation as usize as i64);
                 gen::mov32_r_rm(buf, Reg::Dx, c);
                 gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
-                for &r in VOLATILE_REGS.iter().rev() {
-                    if r != Reg::Ax {
-                        gen::push64(buf, r);
-                    } else {
-                        gen::binop64_imm(buf, Binop::Sub, Reg::Sp, 8);
-                    }
-                }
+
+                gen::push64(buf, Reg::R11);  // to align RSP to 16
+                gen::push64(buf, Reg::R11);
+                gen::push64(buf, Reg::R10);
+                gen::push64(buf, Reg::R9);
+                gen::push64(buf, Reg::R8);
             }
             opcodes::ABANDONMENT => {
-                for &r in VOLATILE_REGS {
-                    gen::pop64(buf, r);
-                }
+                gen::pop64(buf, Reg::R8);
+                gen::pop64(buf, Reg::R9);
+                gen::pop64(buf, Reg::R10);
+                gen::pop64(buf, Reg::R11);
+                gen::pop64(buf, Reg::R11);  // to align RSP to 16
+
                 gen::call_indirect(buf, Reg::Ax);
                 gen::movabs64_imm(buf, Reg::Ax, State::abandonment as usize as i64);
                 gen::mov32_r_rm(buf, Reg::Dx, c);
                 gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
-                for &r in VOLATILE_REGS.iter().rev() {
-                    gen::push64(buf, r);
-                }
+
+                gen::push64(buf, Reg::R11);  // to align RSP to 16
+                gen::push64(buf, Reg::R11);
+                gen::push64(buf, Reg::R10);
+                gen::push64(buf, Reg::R9);
+                gen::push64(buf, Reg::R8);
             }
             opcodes::OUTPUT => {
-                for &r in VOLATILE_REGS {
-                    gen::pop64(buf, r);
-                }
+                gen::pop64(buf, Reg::R8);
+                gen::pop64(buf, Reg::R9);
+                gen::pop64(buf, Reg::R10);
+                gen::pop64(buf, Reg::R11);
+                gen::pop64(buf, Reg::R11);  // to align RSP to 16
+
                 gen::call_indirect(buf, Reg::Ax);
                 gen::movabs64_imm(buf, Reg::Ax, output as usize as i64);
                 gen::mov32_r_rm(buf, Reg::Cx, c);
-                for &r in VOLATILE_REGS.iter().rev() {
-                    gen::push64(buf, r);
-                }
+
+                gen::push64(buf, Reg::R11);  // to align RSP to 16
+                gen::push64(buf, Reg::R11);
+                gen::push64(buf, Reg::R10);
+                gen::push64(buf, Reg::R9);
+                gen::push64(buf, Reg::R8);
             }
             opcodes::INPUT => {
                 gen::mov32_r_rm(buf, c, Reg::Ax);
-                for &r in VOLATILE_REGS {
-                    if r != Reg::Ax {
-                        gen::pop64(buf, r);
-                    } else {
-                        gen::binop64_imm(buf, Binop::Add, Reg::Sp, 8);
-                    }
-                }
+
+                gen::pop64(buf, Reg::R8);
+                gen::pop64(buf, Reg::R9);
+                gen::pop64(buf, Reg::R10);
+                gen::pop64(buf, Reg::R11);
+                gen::pop64(buf, Reg::R11);  // to align RSP to 16
+
                 gen::call_indirect(buf, Reg::Ax);
                 gen::movabs64_imm(buf, Reg::Ax, input as usize as i64);
-                for &r in VOLATILE_REGS.iter().rev() {
-                    if r != Reg::Ax {
-                        gen::push64(buf, r);
-                    } else {
-                        gen::binop64_imm(buf, Binop::Sub, Reg::Sp, 8);
-                    }
-                }
+
+                gen::push64(buf, Reg::R11);  // to align RSP to 16
+                gen::push64(buf, Reg::R11);
+                gen::push64(buf, Reg::R10);
+                gen::push64(buf, Reg::R9);
+                gen::push64(buf, Reg::R8);
             }
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
@@ -382,17 +390,20 @@ impl State {
                     Mem2::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, jump_locations) + VEC_LEN_OFFSET).unwrap()));
 
-                // call self.swith_code(b)
-                for &r in VOLATILE_REGS {
-                    gen::pop64(buf, r);
-                }
+                gen::pop64(buf, Reg::Ax);
+                gen::pop64(buf, Reg::R8);
+                gen::pop64(buf, Reg::R9);
+                gen::pop64(buf, Reg::R10);
+                gen::pop64(buf, Reg::R11);
                 gen::call_indirect(buf, Reg::Ax);
                 gen::movabs64_imm(buf, Reg::Ax, State::switch_code as usize as i64);
                 gen::mov64_r_rm(buf, Reg::Dx, b);
                 gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
-                for &r in VOLATILE_REGS.iter().rev() {
-                    gen::push64(buf, r);
-                }
+                gen::push64(buf, Reg::R11);
+                gen::push64(buf, Reg::R10);
+                gen::push64(buf, Reg::R9);
+                gen::push64(buf, Reg::R8);
+                gen::push64(buf, Reg::Ax);
 
                 // if b != 0 goto no_switch_code
                 gen::jmp_cond(buf, Cond::E, i32::try_from(
@@ -518,6 +529,8 @@ impl State {
               "{r15d}"(self.regs[7])
             : "memory", "cc", "rcx", "rdx"
             : "intel");
+            // TODO: in win64 calling convention, XMM, YMM, ZMM are also
+            // considired volatile and should be added to clobber.
         }
         // println!("done");
     }
