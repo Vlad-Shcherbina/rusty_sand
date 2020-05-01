@@ -145,6 +145,19 @@ pub fn binop64_imm(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem2>
     sink.prepend(&[rex | 0x48, 0x81]);
 }
 
+pub fn mul_op32(sink: &mut impl CodeSink, op: MulOp, rm: impl Into<RegOrMem2>) {
+    let rex = encode_modrm(sink, (op as u8).try_into().unwrap(), rm);
+    sink.prepend(&[0xf7]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
+pub fn mul_op64(sink: &mut impl CodeSink, op: MulOp, rm: impl Into<RegOrMem2>) {
+    let rex = encode_modrm(sink, (op as u8).try_into().unwrap(), rm);
+    sink.prepend(&[rex | 0x48, 0xf7]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,6 +360,40 @@ mod tests {
             (b"\x48\x33\xc3",                 "xor    rax,rbx"),
             (b"\x09\xd8",                     "or     eax,ebx"),
             (b"\x0b\xc3",                     "or     eax,ebx"),
+        ]);
+    }
+
+    #[test]
+    fn mul_op_names() {
+        let mut code = Vec::<u8>::new();
+        let mut expected_texts = Vec::new();
+        for &op in &[MulOp::Mul, MulOp::Imul, MulOp::Div, MulOp::Idiv] {
+            gen::mul_op32(&mut code, op, Reg::Bx);
+            let mut op_name = format!("{:?}", op);
+            op_name.make_ascii_lowercase();
+            expected_texts.push(format!("{:4}   ebx", op_name));
+        }
+        let expected: &[(&[u8], &str)] = &[
+            (b"\xf7\xfb", "idiv   ebx"),
+            (b"\xf7\xf3", "div    ebx"),
+            (b"\xf7\xeb", "imul   ebx"),
+            (b"\xf7\xe3", "mul    ebx"),
+        ];
+        expect_disasm(&code, expected);
+        assert_eq!(expected_texts.len(), expected.len());
+        for (et, &(_, t)) in expected_texts.iter().rev().zip(expected) {
+            assert_eq!(et, t);
+        }
+    }
+
+    #[test]
+    fn mul_op() {
+        let mut code = Vec::<u8>::new();
+        gen::mul_op32(&mut code, MulOp::Imul, Reg::R10);
+        gen::mul_op64(&mut code, MulOp::Div, Reg::R10);
+        expect_disasm(&code, &[
+            (b"\x49\xf7\xf2", "div    r10"),
+            (b"\x41\xf7\xea", "imul   r10d"),
         ]);
     }
 
