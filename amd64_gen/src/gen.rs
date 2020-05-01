@@ -174,6 +174,52 @@ pub fn pop64(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>) {
     }
 }
 
+pub fn jmp_cond(sink: &mut impl CodeSink, cond: Cond, rel: impl Into<RelJumpTarget>) {
+    let cond = cond as u8;
+    match rel.into() {
+        RelJumpTarget::Rel8(rel) => {
+            sink.prepend(&[0x70 | cond, rel as u8]);
+        }
+        RelJumpTarget::Rel32(rel) => {
+            sink.prepend(&rel.to_le_bytes());
+            sink.prepend(&[0x0f, 0x80 | cond]);
+        }
+    }
+}
+
+pub fn jmp_rel(sink: &mut impl CodeSink, rel: impl Into<RelJumpTarget>) {
+    match rel.into() {
+        RelJumpTarget::Rel8(rel) => {
+            sink.prepend(&[0xeb, rel as u8]);
+        }
+        RelJumpTarget::Rel32(rel) => {
+            sink.prepend(&rel.to_le_bytes());
+            sink.prepend(&[0xe9]);
+        }
+    }
+}
+
+pub fn call_rel(sink: &mut impl CodeSink, rel: i32) {
+    sink.prepend(&rel.to_le_bytes());
+    sink.prepend(&[0xe8]);
+}
+
+pub fn jmp_indirect(sink: &mut impl CodeSink, target: impl Into<RegOrMem2>) {
+    let rex = encode_modrm(sink, 4.try_into().unwrap(), target);
+    sink.prepend(&[0xff]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
+pub fn call_indirect(sink: &mut impl CodeSink, target: impl Into<RegOrMem2>) {
+    let rex = encode_modrm(sink, 2.try_into().unwrap(), target);
+    sink.prepend(&[0xff]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,6 +471,85 @@ mod tests {
             (b"\x41\x8f\x87\x00\x00\x00\x00", "pop    QWORD PTR [r15+0x0]"),
             (b"\x41\xff\xb7\x00\x00\x00\x00", "push   QWORD PTR [r15+0x0]"),
             (b"\xff\xf1",                     "push   rcx"),
+        ]);
+    }
+
+    #[test]
+    fn jmp_cond() {
+        let mut code = Vec::<u8>::new();
+        let mut expected_starts = Vec::new();
+        for cond in Cond::all() {
+            for &rel in &[5, 1000] {
+                gen::jmp_cond(&mut code, cond, rel);
+                let mut cond_name = format!("j{:?} ", cond);
+                cond_name.make_ascii_lowercase();
+                expected_starts.push(cond_name);
+            }
+        }
+        let expected: &[(&[u8], &str)] = &[
+            (b"\x0f\x8f\xe8\x03\x00\x00", "jg     0x3ee"),
+            (b"\x7f\x05",                 "jg     0xd"),
+            (b"\x0f\x8e\xe8\x03\x00\x00", "jle    0x3f6"),
+            (b"\x7e\x05",                 "jle    0x15"),
+            (b"\x0f\x8d\xe8\x03\x00\x00", "jge    0x3fe"),
+            (b"\x7d\x05",                 "jge    0x1d"),
+            (b"\x0f\x8c\xe8\x03\x00\x00", "jl     0x406"),
+            (b"\x7c\x05",                 "jl     0x25"),
+            (b"\x0f\x8b\xe8\x03\x00\x00", "jnp    0x40e"),
+            (b"\x7b\x05",                 "jnp    0x2d"),
+            (b"\x0f\x8a\xe8\x03\x00\x00", "jp     0x416"),
+            (b"\x7a\x05",                 "jp     0x35"),
+            (b"\x0f\x89\xe8\x03\x00\x00", "jns    0x41e"),
+            (b"\x79\x05",                 "jns    0x3d"),
+            (b"\x0f\x88\xe8\x03\x00\x00", "js     0x426"),
+            (b"\x78\x05",                 "js     0x45"),
+            (b"\x0f\x87\xe8\x03\x00\x00", "ja     0x42e"),
+            (b"\x77\x05",                 "ja     0x4d"),
+            (b"\x0f\x86\xe8\x03\x00\x00", "jbe    0x436"),
+            (b"\x76\x05",                 "jbe    0x55"),
+            (b"\x0f\x85\xe8\x03\x00\x00", "jne    0x43e"),
+            (b"\x75\x05",                 "jne    0x5d"),
+            (b"\x0f\x84\xe8\x03\x00\x00", "je     0x446"),
+            (b"\x74\x05",                 "je     0x65"),
+            (b"\x0f\x83\xe8\x03\x00\x00", "jae    0x44e"),
+            (b"\x73\x05",                 "jae    0x6d"),
+            (b"\x0f\x82\xe8\x03\x00\x00", "jb     0x456"),
+            (b"\x72\x05",                 "jb     0x75"),
+            (b"\x0f\x81\xe8\x03\x00\x00", "jno    0x45e"),
+            (b"\x71\x05",                 "jno    0x7d"),
+            (b"\x0f\x80\xe8\x03\x00\x00", "jo     0x466"),
+            (b"\x70\x05",                 "jo     0x85"),
+        ];
+        expect_disasm(&code, expected);
+        assert_eq!(expected_starts.len(), expected.len());
+        for (es, &(_, t)) in expected_starts.iter().rev().zip(expected) {
+            assert!(t.starts_with(es));
+        }
+    }
+
+    #[test]
+    fn jmp_call_rel() {
+        let mut code = Vec::<u8>::new();
+        gen::jmp_rel(&mut code, -2);
+        gen::jmp_rel(&mut code, 1000);
+        gen::jmp_rel(&mut code, RelJumpTarget::Rel32(-5));
+        gen::call_rel(&mut code, -5);
+        expect_disasm(&code, &[
+            (b"\xe8\xfb\xff\xff\xff", "call   0x0"),
+            (b"\xe9\xfb\xff\xff\xff", "jmp    0x5"),
+            (b"\xe9\xe8\x03\x00\x00", "jmp    0x3f7"),
+            (b"\xeb\xfe",             "jmp    0xf"),
+        ]);
+    }
+
+    #[test]
+    fn jmp_call_indirect() {
+        let mut code = Vec::<u8>::new();
+        gen::jmp_indirect(&mut code, Reg::Cx);
+        gen::call_indirect(&mut code, Mem2::base(Reg::R14));
+        expect_disasm(&code, &[
+            (b"\x41\xff\x96\x00\x00\x00\x00", "call   QWORD PTR [r14+0x0]"),
+            (b"\xff\xe1",                     "jmp    rcx"),
         ]);
     }
 
