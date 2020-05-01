@@ -78,6 +78,23 @@ pub fn mov64_rm_r(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, r: Reg) {
     sink.prepend(&[rex | 0x48, 0x89]);
 }
 
+pub fn mov32_imm(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, imm: i32) {
+    let rm: RegOrMem2 = rm.into();
+    sink.prepend(&imm.to_le_bytes());
+    let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
+    sink.prepend(&[0xc7]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
+pub fn mov64_imm(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, imm: i32) {
+    let rm: RegOrMem2 = rm.into();
+    sink.prepend(&imm.to_le_bytes());
+    let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
+    sink.prepend(&[rex | 0x48, 0xc7]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,6 +202,30 @@ mod tests {
             (b"\x49\x8b\xcf", "mov    rcx,r15"),
             (b"\x48\x89\xd9", "mov    rcx,rbx"),
             (b"\x48\x8b\xcb", "mov    rcx,rbx"),
+        ]);
+    }
+
+    #[test]
+    fn mov_rm() {
+        let mut code = Vec::<u8>::new();
+        gen::mov32_r_rm(&mut code, Reg::Bx, Mem2::base(Reg::Si));
+        gen::mov32_rm_r(&mut code, Mem2::base(Reg::R8), Reg::R11);
+        expect_disasm(&code, &[
+            (b"\x45\x89\x98\x00\x00\x00\x00", "mov    DWORD PTR [r8+0x0],r11d"),
+            (b"\x8b\x9e\x00\x00\x00\x00",     "mov    ebx,DWORD PTR [rsi+0x0]"),
+        ]);
+    }
+
+    #[test]
+    fn mov_imm() {
+        let mut code = Vec::<u8>::new();
+        gen::mov32_imm(&mut code, Reg::R9, 0x42);
+        gen::mov32_imm(&mut code, Mem2::base(Reg::R11), 0x42);
+        gen::mov64_imm(&mut code, Reg::Dx, -2);
+        expect_disasm(&code, &[
+            (b"\x48\xc7\xc2\xfe\xff\xff\xff",                 "mov    rdx,0xfffffffffffffffe"),
+            (b"\x41\xc7\x83\x00\x00\x00\x00\x42\x00\x00\x00", "mov    DWORD PTR [r11+0x0],0x42"),
+            (b"\x41\xc7\xc1\x42\x00\x00\x00",                 "mov    r9d,0x42"),
         ]);
     }
 
