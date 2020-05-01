@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::convert::TryFrom;
 use exe_buf::ExeBuf;
-use amd64_gen::{Gen, R32, R64, Binop, Mem, Cond, MulOp};
+use amd64_gen::{CodeSink, gen, Reg, Binop, Mem2, Cond, MulOp};
 use crate::interp::opcodes;
 
 #[derive(Default)]
@@ -20,7 +20,7 @@ pub struct Stats {
 pub struct State {
     pub finger: u32,
     pub regs: [u32; 8],
-    exe_buf: ExeBuf,
+    exe_buf: ExeBufCodeSink,
     uncompile_fn_ptr: *const u8,
     jump_locations: Vec<*const u8>,
     arrays: Vec<Vec<u32>>,
@@ -28,23 +28,45 @@ pub struct State {
     pub stats: Stats,
 }
 
+struct ExeBufCodeSink(ExeBuf);
+
+impl ExeBufCodeSink {
+    fn new(exe_buf: ExeBuf) -> Self {
+        Self(exe_buf)
+    }
+
+    fn cur_pos(&self) -> *const u8 {
+        self.0.cur_pos()
+    }
+
+    fn inner_mut(&mut self) -> &mut ExeBuf {
+        &mut self.0
+    }
+}
+
+impl CodeSink for ExeBufCodeSink {
+    fn prepend(&mut self, data: &[u8]) {
+        self.inner_mut().push(data);
+    }
+}
+
 impl State {
     pub fn new(prog: Vec<u32>) -> State {
-        let mut exe_buf = ExeBuf::reserve(1 << 30);
+        let mut exe_buf = ExeBufCodeSink::new(ExeBuf::reserve(1 << 30));
 
         // call [rbx].uncompile(rdx)
-        exe_buf.push(Gen::ret().as_slice());
-        for &r in VOLATILE_REGS {
-            if r != R64::Rax && r != R64::Rcx && r != R64::Rdx {
-                exe_buf.push(Gen::pop(r).as_slice());
+        gen::ret(&mut exe_buf);
+        for &r in VOLATILE_REGS {  // TODO: unroll
+            if r != Reg::Ax && r != Reg::Cx && r != Reg::Dx {
+                gen::pop64(&mut exe_buf, r);
             }
         }
-        exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
-        exe_buf.push(Gen::mov(R64::Rax, State::uncompile as usize as i64).as_slice());
-        exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+        gen::call_indirect(&mut exe_buf, Reg::Ax);
+        gen::movabs64_imm(&mut exe_buf, Reg::Ax, State::uncompile as usize as i64);
+        gen::mov64_r_rm(&mut exe_buf, Reg::Cx, Reg::Bx);
         for &r in VOLATILE_REGS.iter().rev() {
-            if r != R64::Rax && r != R64::Rcx && r != R64::Rdx {
-                exe_buf.push(Gen::push(r).as_slice());
+            if r != Reg::Ax && r != Reg::Cx && r != Reg::Dx {
+                gen::push64(&mut exe_buf, r);
             }
         }
         let uncompile_fn_ptr = exe_buf.cur_pos() as *const u8;
@@ -96,10 +118,6 @@ unsafe fn jit_trampoline() {
     : : "{rbp}"(State::compile as usize) : : "intel");
 }
 
-extern "win64" fn halt() {
-    // println!("halt");
-}
-
 extern "win64" fn output(c: u32) {
     print!("{}", u8::try_from(c).unwrap() as char);
     std::io::stdout().flush().unwrap();
@@ -126,17 +144,16 @@ extern "win64" fn fail(s: *const std::os::raw::c_char) {
     std::process::exit(1);
 }
 
-fn fail_code(s: &'static str) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(50);
-    buf.extend_from_slice(Gen::mov(R64::Rcx, s.as_ptr() as usize as i64).as_slice());
-    buf.extend_from_slice(Gen::mov(R64::Rax, fail as usize as i64).as_slice());
+fn fail_code(buf: &mut ExeBufCodeSink, s: &'static str) {
+    assert!(s.ends_with('\0'));
+    gen::call_indirect(buf, Reg::Ax);
 
     // ensure 16-byte stack alignment
-    buf.extend_from_slice(Gen::binop(Binop::And, R64::Rsp, -16i64).as_slice());
-    buf.extend_from_slice(Gen::binop(Binop::Sub, R64::Rsp, 0x80i64).as_slice());
+    gen::binop64_imm(buf, Binop::Sub, Reg::Sp, 0x80);
+    gen::binop64_imm(buf, Binop::And, Reg::Sp, -16);
 
-    buf.extend_from_slice(Gen::call_indirect(R64::Rax).as_slice());
-    buf
+    gen::movabs64_imm(buf, Reg::Ax, fail as usize as i64);
+    gen::movabs64_imm(buf, Reg::Cx, s.as_ptr() as usize as i64);
 }
 
 fn is_fallthrough(cmd: u32) -> bool {
@@ -149,7 +166,8 @@ const VEC_PTR_OFFSET: usize = 0;
 const VEC_LEN_OFFSET: usize = 16;
 
 /// Registers that should be saved by the caller in the win64 calling convention.
-const VOLATILE_REGS: &[R64] = &[R64::Rax, R64::Rcx, R64::Rdx, R64::R8, R64::R9, R64::R10, R64::R11];
+const VOLATILE_REGS: &[Reg] = &[Reg::Ax, Reg::Cx, Reg::Dx, Reg::R8, Reg::R9, Reg::R10, Reg::R11];
+
 
 impl State {
     fn compile_insn(&mut self, pos: usize) {
@@ -157,11 +175,13 @@ impl State {
         let op = insn >> 28;
         self.stats.ops[op as usize].cnt += 1;
         let end_ptr = self.exe_buf.cur_pos();
+        let buf = &mut self.exe_buf;
         if op == opcodes::ORTHOGRAPHY {
-            let a = ((insn >> 25) & 7) as usize;
+            let a = ((insn >> 25) & 7) as u8;
+            let a = Reg::try_from(8 + a).unwrap();
             let imm = insn & ((1 << 25) - 1);
-            self.exe_buf.push(Gen::mov(R32::try_from(8 + a as u8).unwrap(), imm as i32).as_slice());
-            self.stats.ops[op as usize].code_len += end_ptr as usize - self.exe_buf.cur_pos() as usize;
+            gen::mov32_imm(buf, a, imm as i32);
+            self.stats.ops[op as usize].code_len += end_ptr as usize - buf.cur_pos() as usize;
             return;
         }
         let a = ((insn >> 6) & 7) as u8;
@@ -169,79 +189,65 @@ impl State {
         let c = (insn & 7) as u8;
         match op {
             opcodes::CMOVE => {
-                let a = R32::try_from(8 + a).unwrap();
-                let b = R32::try_from(8 + b).unwrap();
-                let c = R32::try_from(8 + c).unwrap();
-                let skip = self.exe_buf.cur_pos();
-                self.exe_buf.push(Gen::mov(a, b).as_slice());
-                self.exe_buf.push(Gen::jump_cond(Cond::E,
-                    i32::try_from(skip as usize - self.exe_buf.cur_pos() as usize).unwrap(),
-                ).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Cmp, c, 0i32).as_slice());
+                let a = Reg::try_from(8 + a).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+                let skip = buf.cur_pos();
+                gen::mov32_r_rm(buf, a, b);
+                let rel = i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap();
+                gen::jmp_cond(buf, Cond::E, rel);
+                gen::binop32_imm(buf, Binop::Cmp, c, 0);
             }
             opcodes::ARRAY_INDEX => {
                 // TODO: bounds check
-                let a = R32::try_from(8 + a).unwrap();
-                let b = R64::try_from(8 + b).unwrap();
-                let c = R64::try_from(8 + c).unwrap();
+                let a = Reg::try_from(8 + a).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
 
                 // lea rax, [b + 2 * b]
                 // mov rcx, self.arrays.ptr
                 // mov rax, [rcx + 8 * rax + VEC_PTR_OFFSET]
                 // mov a, [rax + 4 * c]
-
                 assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
-                self.exe_buf.push(Gen::mov(
-                    a,
-                    Mem::base(R64::Rax).index_scale(c, 4),
-                ).as_slice());
-                self.exe_buf.push(Gen::mov(
-                    R64::Rax,
-                    Mem::base(R64::Rcx).index_scale(R64::Rax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()),
-                ).as_slice());
-                self.exe_buf.push(Gen::mov(
-                    R64::Rcx,
-                    Mem::base(R64::Rbx).disp(i32::try_from(
-                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()),
-                ).as_slice());
-                self.exe_buf.push(Gen::lea(R64::Rax, Mem::base(b).index_scale(b, 2)).as_slice());
+                gen::mov32_r_rm(buf, a, Mem2::base(Reg::Ax).index_scale(c, 4));
+                gen::mov64_r_rm(buf, Reg::Ax,
+                    Mem2::base(Reg::Cx).index_scale(Reg::Ax, 8)
+                    .disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
+                gen::mov64_r_rm(buf, Reg::Cx,
+                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET
+                    ).unwrap()));
+                gen::lea64(buf, Reg::Ax, Mem2::base(b).index_scale(b, 2));
             }
             opcodes::ARRAY_AMENDMENT => {
                 // TODO: bounds check
-                let a = R64::try_from(8 + a).unwrap();
-                let b = R64::try_from(8 + b).unwrap();
-                let c = R32::try_from(8 + c).unwrap();
+                let a = Reg::try_from(8 + a).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
 
-                let skip = self.exe_buf.cur_pos();
+                let skip = buf.cur_pos();
 
                 // jump to the next instruction
-                self.exe_buf.push(Gen::jump_indirect(Mem::base(R64::Rsi).index_scale(R64::Rax, 8)).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Eax, i32::try_from(pos + 1).unwrap()).as_slice());
+                gen::jmp_indirect(buf, Mem2::base(Reg::Si).index_scale(Reg::Ax, 8));
+                gen::mov32_imm(buf, Reg::Ax, i32::try_from(pos + 1).unwrap());
 
                 // call self.uncompile(b)
-                self.exe_buf.push(Gen::call(i32::try_from(
-                    self.uncompile_fn_ptr as usize - self.exe_buf.cur_pos() as usize
-                ).unwrap()).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rdx, b).as_slice());
+                gen::call_rel(buf, i32::try_from(self.uncompile_fn_ptr as usize - buf.cur_pos() as usize).unwrap());
+                gen::mov64_r_rm(buf, Reg::Dx, b);  // TODO could it be mov32?
 
                 // if jump_targets[b] == jit_trampoline goto skip
-                self.exe_buf.push(Gen::jump_cond(
-                    Cond::E,
-                    i32::try_from(skip as usize - self.exe_buf.cur_pos() as usize).unwrap(),
-                ).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Cmp,
-                    Mem::base(R64::Rsi)
-                        .index_scale(b, 8),
-                    R64::Rax,
-                ).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, jit_trampoline as usize as i64).as_slice());
+                gen::jmp_cond(buf, Cond::E,
+                    i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap());
+                gen::binop64_rm_r(buf, Binop::Cmp,
+                    Mem2::base(Reg::Si).index_scale(b, 8),
+                    Reg::Ax,
+                );
+                gen::movabs64_imm(buf, Reg::Ax, jit_trampoline as usize as i64);
 
                 // if a != 0 goto skip
-                self.exe_buf.push(Gen::jump_cond(
-                    Cond::Ne,
-                    i32::try_from(skip as usize - self.exe_buf.cur_pos() as usize).unwrap(),
-                ).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Cmp, a, 0i64).as_slice());
+                gen::jmp_cond(buf, Cond::Ne,
+                    i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap());
+                gen::binop64_imm(buf, Binop::Cmp, a, 0);  // TODO: could it be binop32?
 
                 // self.arrays[a][b] <- c
                 //    or
@@ -250,202 +256,177 @@ impl State {
                 // mov rax, [rcx + 8 * rax + VEC_PTR_OFFSET]
                 // mov [rax + 4 * b], c
                 assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
-                self.exe_buf.push(Gen::mov(
-                    Mem::base(R64::Rax).index_scale(b, 4),
-                    c,
-                ).as_slice());
-                self.exe_buf.push(Gen::mov(
-                    R64::Rax,
-                    Mem::base(R64::Rcx).index_scale(R64::Rax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()),
-                ).as_slice());
-                self.exe_buf.push(Gen::mov(
-                    R64::Rcx,
-                    Mem::base(R64::Rbx).disp(i32::try_from(
-                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()),
-                ).as_slice());
-                self.exe_buf.push(Gen::lea(R64::Rax, Mem::base(a).index_scale(a, 2)).as_slice());
+                gen::mov32_rm_r(buf, Mem2::base(Reg::Ax).index_scale(b, 4), c);
+                gen::mov64_r_rm(buf, Reg::Ax,
+                    Mem2::base(Reg::Cx).index_scale(Reg::Ax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
+                gen::mov64_r_rm(buf, Reg::Cx,
+                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()));
+                gen::lea64(buf, Reg::Ax, Mem2::base(a).index_scale(a, 2));
             }
             opcodes::ADDITION => {
-                let a = R32::try_from(8 + a).unwrap();
-                let b = R32::try_from(8 + b).unwrap();
-                let c = R32::try_from(8 + c).unwrap();
-                self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Add, R32::Eax, c).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
+                let a = Reg::try_from(8 + a).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+                gen::mov32_r_rm(buf, a, Reg::Ax);
+                gen::binop32_r_rm(buf, Binop::Add, Reg::Ax, c);
+                gen::mov32_r_rm(buf, Reg::Ax, b);
             }
             opcodes::MULTIPLICATION => {
-                let a = R32::try_from(8 + a).unwrap();
-                let b = R32::try_from(8 + b).unwrap();
-                let c = R32::try_from(8 + c).unwrap();
-                self.exe_buf.push(Gen::pop(R64::Rdx).as_slice());
-                self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
-                self.exe_buf.push(Gen::mul_op(MulOp::Mul, c).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
-                self.exe_buf.push(Gen::push(R64::Rdx).as_slice());
+                let a = Reg::try_from(8 + a).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+                gen::pop64(buf, Reg::Dx);
+                gen::mov32_r_rm(buf, a, Reg::Ax);
+                gen::mul_op32(buf, MulOp::Mul, c);
+                gen::mov32_r_rm(buf, Reg::Ax, b);
+                gen::push64(buf, Reg::Dx);
             }
             opcodes::DIVISION => {
                 // TODO: maybe explicitly fail on division by zero?
-                let a = R32::try_from(8 + a).unwrap();
-                let b = R32::try_from(8 + b).unwrap();
-                let c = R32::try_from(8 + c).unwrap();
-                self.exe_buf.push(Gen::pop(R64::Rdx).as_slice());
-                self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
-                self.exe_buf.push(Gen::mul_op(MulOp::Div, c).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Edx, 0i32).as_slice());
-                self.exe_buf.push(Gen::push(R64::Rdx).as_slice());
+                let a = Reg::try_from(8 + a).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+                gen::pop64(buf, Reg::Dx);
+                gen::mov32_r_rm(buf, a, Reg::Ax);
+                gen::mul_op32(buf, MulOp::Div, c);
+                gen::mov32_r_rm(buf, Reg::Ax, b);
+                gen::mov32_imm(buf, Reg::Dx, 0);  // TODO: xor edx, edx
+                gen::push64(buf, Reg::Dx);
             }
             opcodes::NOT_AND => {
-                let a = R32::try_from(8 + a).unwrap();
-                let b = R32::try_from(8 + b).unwrap();
-                let c = R32::try_from(8 + c).unwrap();
-                self.exe_buf.push(Gen::mov(a, R32::Eax).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Xor, R32::Eax, -1i32).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::And, R32::Eax, c).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Eax, b).as_slice());
+                let a = Reg::try_from(8 + a).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+                gen::mov32_r_rm(buf, a, Reg::Ax);
+                gen::binop32_imm(buf, Binop::Xor, Reg::Ax, -1);
+                gen::binop32_r_rm(buf, Binop::And, Reg::Ax, c);
+                gen::mov32_r_rm(buf, Reg::Ax, b);
             }
             opcodes::HALT => {
-                let mut t = Vec::<u8>::new();
-                for &r in VOLATILE_REGS {
-                    t.extend_from_slice(Gen::push(r).as_slice());
-                }
-                t.extend_from_slice(Gen::binop(Binop::Sub, R64::Rsp, 0x20i64).as_slice());
-                t.extend_from_slice(Gen::mov(R64::Rax, halt as usize as i64).as_slice());
-                t.extend_from_slice(Gen::call_indirect(R64::Rax).as_slice());
-                t.extend_from_slice(Gen::binop(Binop::Add, R64::Rsp, 0x20i64).as_slice());
-                for &r in VOLATILE_REGS.iter().rev() {
-                    t.extend_from_slice(Gen::pop(r).as_slice());
-                }
+                // ret from 'call jump_locations[finger]' in State::run()
+                gen::ret(buf);
 
                 // self.finger <- pos + 1
-                t.extend_from_slice(Gen::mov(
-                    Mem::base(R64::Rbx).disp(i32::try_from(memoffset::offset_of!(State, finger)).unwrap()),
-                    i32::try_from(pos + 1).unwrap(),
-                ).as_slice());
-
-                // ret from 'call jump_locations[finger]' in State::run()
-                t.extend_from_slice(Gen::ret().as_slice());
-
-                self.exe_buf.push(t.as_slice());
+                gen::mov32_imm(buf,
+                    Mem2::base(Reg::Bx).disp(i32::try_from(memoffset::offset_of!(State, finger)).unwrap()),
+                    i32::try_from(pos + 1).unwrap());
             }
             opcodes::ALLOCATION => {
-                let c = R32::try_from(8 + c).unwrap();
-                let b = R32::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
 
                 // b <- call self.allocation(c)
-                self.exe_buf.push(Gen::mov(b, R32::Eax).as_slice());
+                gen::mov32_r_rm(buf, b, Reg::Ax);
                 for &r in VOLATILE_REGS {
-                    if r != R64::Rax {
-                        self.exe_buf.push(Gen::pop(r).as_slice());
+                    if r != Reg::Ax {
+                        gen::pop64(buf, r);
                     } else {
-                        self.exe_buf.push(Gen::binop(Binop::Add, R64::Rsp, 8i64).as_slice());
+                        gen::binop64_imm(buf, Binop::Add, Reg::Sp, 8);
                     }
                 }
-                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, State::allocation as usize as i64).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Edx, c).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+                gen::call_indirect(buf, Reg::Ax);
+                gen::movabs64_imm(buf, Reg::Ax, State::allocation as usize as i64);
+                gen::mov32_r_rm(buf, Reg::Dx, c);
+                gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
                 for &r in VOLATILE_REGS.iter().rev() {
-                    if r != R64::Rax {
-                        self.exe_buf.push(Gen::push(r).as_slice());
+                    if r != Reg::Ax {
+                        gen::push64(buf, r);
                     } else {
-                        self.exe_buf.push(Gen::binop(Binop::Sub, R64::Rsp, 8i64).as_slice());
+                        gen::binop64_imm(buf, Binop::Sub, Reg::Sp, 8);
                     }
                 }
             }
             opcodes::ABANDONMENT => {
-                let c = R32::try_from(8 + c).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+
                 for &r in VOLATILE_REGS {
-                    self.exe_buf.push(Gen::pop(r).as_slice());
+                    gen::pop64(buf, r);
                 }
-                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, State::abandonment as usize as i64).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Edx, c).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+                gen::call_indirect(buf, Reg::Ax);
+                gen::movabs64_imm(buf, Reg::Ax, State::abandonment as usize as i64);
+                gen::mov32_r_rm(buf, Reg::Dx, c);
+                gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
                 for &r in VOLATILE_REGS.iter().rev() {
-                    self.exe_buf.push(Gen::push(r).as_slice());
+                    gen::push64(buf, r);
                 }
             }
             opcodes::OUTPUT => {
-                let c = R32::try_from(8 + c).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+
                 for &r in VOLATILE_REGS {
-                    self.exe_buf.push(Gen::pop(r).as_slice());
+                    gen::pop64(buf, r);
                 }
-                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, output as usize as i64).as_slice());
-                self.exe_buf.push(Gen::mov(R32::Ecx, c).as_slice());
+                gen::call_indirect(buf, Reg::Ax);
+                gen::movabs64_imm(buf, Reg::Ax, output as usize as i64);
+                gen::mov32_r_rm(buf, Reg::Cx, c);
                 for &r in VOLATILE_REGS.iter().rev() {
-                    self.exe_buf.push(Gen::push(r).as_slice());
+                    gen::push64(buf, r);
                 }
             }
             opcodes::INPUT => {
-                let c = R32::try_from(8 + c).unwrap();
-                self.exe_buf.push(Gen::mov(c, R32::Eax).as_slice());
+                let c = Reg::try_from(8 + c).unwrap();
+
+                gen::mov32_r_rm(buf, c, Reg::Ax);
                 for &r in VOLATILE_REGS {
-                    if r != R64::Rax {
-                        self.exe_buf.push(Gen::pop(r).as_slice());
+                    if r != Reg::Ax {
+                        gen::pop64(buf, r);
                     } else {
-                        self.exe_buf.push(Gen::binop(Binop::Add, R64::Rsp, 8i64).as_slice());
+                        gen::binop64_imm(buf, Binop::Add, Reg::Sp, 8);
                     }
                 }
-                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, input as usize as i64).as_slice());
+                gen::call_indirect(buf, Reg::Ax);
+                gen::movabs64_imm(buf, Reg::Ax, input as usize as i64);
                 for &r in VOLATILE_REGS.iter().rev() {
-                    if r != R64::Rax {
-                        self.exe_buf.push(Gen::push(r).as_slice());
+                    if r != Reg::Ax {
+                        gen::push64(buf, r);
                     } else {
-                        self.exe_buf.push(Gen::binop(Binop::Sub, R64::Rsp, 8i64).as_slice());
+                        gen::binop64_imm(buf, Binop::Sub, Reg::Sp, 8);
                     }
                 }
             }
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
-                let c = R64::try_from(8 + c).unwrap();
-                let b = R64::try_from(8 + b).unwrap();
+                let c = Reg::try_from(8 + c).unwrap();
+                let b = Reg::try_from(8 + b).unwrap();
 
-                self.exe_buf.push(Gen::jump_indirect(Mem::base(R64::Rsi).index_scale(c, 8)).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, c).as_slice());
+                gen::jmp_indirect(buf, Mem2::base(Reg::Si).index_scale(c, 8));
+                gen::mov64_r_rm(buf, Reg::Ax, c);
 
-                let no_fail = self.exe_buf.cur_pos();
-                self.exe_buf.push(fail_code("LOAD_PROGRAM: c >= arrays[0].len()\0").as_slice());
-                self.exe_buf.push(Gen::jump_cond(Cond::B,
-                    i32::try_from(no_fail as usize - self.exe_buf.cur_pos() as usize).unwrap(),
-                ).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Cmp, c, R64::Rdi).as_slice());
+                let no_fail = buf.cur_pos();
+                fail_code(buf, "LOAD_PROGRAM: c >= arrays[0].len()\0");
+                gen::jmp_cond(buf, Cond::B,
+                    i32::try_from(no_fail as usize - buf.cur_pos() as usize).unwrap());
+                gen::binop64_r_rm(buf, Binop::Cmp, c, Reg::Di);
 
-                let no_switch_code = self.exe_buf.cur_pos();
+                let no_switch_code = buf.cur_pos();
 
                 // rsi <- jump_locations
-                self.exe_buf.push(Gen::mov(
-                    R64::Rsi,
-                    Mem::base(R64::Rbx).disp(i32::try_from(
-                        memoffset::offset_of!(State, jump_locations) + VEC_PTR_OFFSET).unwrap()),
-                ).as_slice());
+                gen::mov64_r_rm(buf, Reg::Si,
+                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                        memoffset::offset_of!(State, jump_locations) + VEC_PTR_OFFSET).unwrap()));
                 // rdi <- jump_locations.len
-                self.exe_buf.push(Gen::mov(
-                    R64::Rdi,
-                    Mem::base(R64::Rbx).disp(i32::try_from(
-                        memoffset::offset_of!(State, jump_locations) + VEC_LEN_OFFSET).unwrap()),
-                ).as_slice());
+                gen::mov64_r_rm(buf, Reg::Di,
+                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                        memoffset::offset_of!(State, jump_locations) + VEC_LEN_OFFSET).unwrap()));
 
                 // call self.swith_code(b)
                 for &r in VOLATILE_REGS {
-                    self.exe_buf.push(Gen::pop(r).as_slice());
+                    gen::pop64(buf, r);
                 }
-                self.exe_buf.push(Gen::call_indirect(R64::Rax).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rax, State::switch_code as usize as i64).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rdx, b).as_slice());
-                self.exe_buf.push(Gen::mov(R64::Rcx, R64::Rbx).as_slice());
+                gen::call_indirect(buf, Reg::Ax);
+                gen::movabs64_imm(buf, Reg::Ax, State::switch_code as usize as i64);
+                gen::mov64_r_rm(buf, Reg::Dx, b);
+                gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
                 for &r in VOLATILE_REGS.iter().rev() {
-                    self.exe_buf.push(Gen::push(r).as_slice());
+                    gen::push64(buf, r);
                 }
 
                 // if b != 0 goto no_switch_code
-                self.exe_buf.push(Gen::jump_cond(Cond::E,
-                    i32::try_from(no_switch_code as usize - self.exe_buf.cur_pos() as usize).unwrap(),
-                ).as_slice());
-                self.exe_buf.push(Gen::binop(Binop::Cmp, b, 0i64).as_slice());
+                gen::jmp_cond(buf, Cond::E, i32::try_from(
+                    no_switch_code as usize - buf.cur_pos() as usize).unwrap());
+                gen::binop64_imm(buf, Binop::Cmp, b, 0);  // TODO: could be binop32
             }
             _ => panic!("op: {}", op),
         }
