@@ -96,6 +96,14 @@ pub fn movabs64_imm(sink: &mut impl CodeSink, r: Reg, imm: i64) {
     sink.prepend(&[0x48 | r >> 3, 0xb8 | r & 7]);
 }
 
+pub fn lea64(sink: &mut impl CodeSink, r: Reg, m: impl Into<RegOrMem2> + Copy) {
+    if let RegOrMem2::Reg(_) = m.into() {
+        panic!("lea with register");
+    }
+    let rex = encode_modrm(sink, r, m);
+    sink.prepend(&[rex | 0x48, 0x8d]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +246,17 @@ mod tests {
         expect_disasm(&code, &[
             (b"\x49\xb9\x90\x78\x56\x34\x12\x00\x00\x00", "movabs r9,0x1234567890"),
             (b"\x48\xbb\x90\x78\x56\x34\x12\x00\x00\x00", "movabs rbx,0x1234567890"),
+        ]);
+    }
+
+    #[test]
+    fn lea() {
+        let mut code = Vec::<u8>::new();
+        gen::lea64(&mut code, Reg::Cx, Mem2::base(Reg::R11));
+        gen::lea64(&mut code, Reg::Cx, RipRel(0x42));
+        expect_disasm(&code, &[
+            (b"\x48\x8d\x0d\x42\x00\x00\x00", "lea    rcx,[rip+0x42]"),
+            (b"\x49\x8d\x8b\x00\x00\x00\x00", "lea    rcx,[r11+0x0]"),
         ]);
     }
 

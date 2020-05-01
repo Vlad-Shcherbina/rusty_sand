@@ -117,6 +117,7 @@ impl Mem2 {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum RegOrMem2 {
     Reg(Reg),
     RipRel(i32),
