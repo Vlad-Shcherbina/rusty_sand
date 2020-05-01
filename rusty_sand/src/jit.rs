@@ -187,11 +187,11 @@ impl State {
         let a = ((insn >> 6) & 7) as u8;
         let b = ((insn >> 3) & 7) as u8;
         let c = (insn & 7) as u8;
+        let a = Reg::try_from(8 + a).unwrap();
+        let b = Reg::try_from(8 + b).unwrap();
+        let c = Reg::try_from(8 + c).unwrap();
         match op {
             opcodes::CMOVE => {
-                let a = Reg::try_from(8 + a).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
-                let c = Reg::try_from(8 + c).unwrap();
                 let skip = buf.cur_pos();
                 gen::mov32_r_rm(buf, a, b);
                 let rel = i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap();
@@ -200,9 +200,6 @@ impl State {
             }
             opcodes::ARRAY_INDEX => {
                 // TODO: bounds check
-                let a = Reg::try_from(8 + a).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
-                let c = Reg::try_from(8 + c).unwrap();
 
                 // lea rax, [b + 2 * b]
                 // mov rcx, self.arrays.ptr
@@ -221,9 +218,6 @@ impl State {
             }
             opcodes::ARRAY_AMENDMENT => {
                 // TODO: bounds check
-                let a = Reg::try_from(8 + a).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
-                let c = Reg::try_from(8 + c).unwrap();
 
                 let skip = buf.cur_pos();
 
@@ -265,17 +259,11 @@ impl State {
                 gen::lea64(buf, Reg::Ax, Mem2::base(a).index_scale(a, 2));
             }
             opcodes::ADDITION => {
-                let a = Reg::try_from(8 + a).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
-                let c = Reg::try_from(8 + c).unwrap();
                 gen::mov32_r_rm(buf, a, Reg::Ax);
                 gen::binop32_r_rm(buf, Binop::Add, Reg::Ax, c);
                 gen::mov32_r_rm(buf, Reg::Ax, b);
             }
             opcodes::MULTIPLICATION => {
-                let a = Reg::try_from(8 + a).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
-                let c = Reg::try_from(8 + c).unwrap();
                 gen::pop64(buf, Reg::Dx);
                 gen::mov32_r_rm(buf, a, Reg::Ax);
                 gen::mul_op32(buf, MulOp::Mul, c);
@@ -284,9 +272,6 @@ impl State {
             }
             opcodes::DIVISION => {
                 // TODO: maybe explicitly fail on division by zero?
-                let a = Reg::try_from(8 + a).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
-                let c = Reg::try_from(8 + c).unwrap();
                 gen::pop64(buf, Reg::Dx);
                 gen::mov32_r_rm(buf, a, Reg::Ax);
                 gen::mul_op32(buf, MulOp::Div, c);
@@ -295,9 +280,6 @@ impl State {
                 gen::push64(buf, Reg::Dx);
             }
             opcodes::NOT_AND => {
-                let a = Reg::try_from(8 + a).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
-                let c = Reg::try_from(8 + c).unwrap();
                 gen::mov32_r_rm(buf, a, Reg::Ax);
                 gen::binop32_imm(buf, Binop::Xor, Reg::Ax, -1);
                 gen::binop32_r_rm(buf, Binop::And, Reg::Ax, c);
@@ -313,9 +295,6 @@ impl State {
                     i32::try_from(pos + 1).unwrap());
             }
             opcodes::ALLOCATION => {
-                let c = Reg::try_from(8 + c).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
-
                 // b <- call self.allocation(c)
                 gen::mov32_r_rm(buf, b, Reg::Ax);
                 for &r in VOLATILE_REGS {
@@ -338,8 +317,6 @@ impl State {
                 }
             }
             opcodes::ABANDONMENT => {
-                let c = Reg::try_from(8 + c).unwrap();
-
                 for &r in VOLATILE_REGS {
                     gen::pop64(buf, r);
                 }
@@ -352,8 +329,6 @@ impl State {
                 }
             }
             opcodes::OUTPUT => {
-                let c = Reg::try_from(8 + c).unwrap();
-
                 for &r in VOLATILE_REGS {
                     gen::pop64(buf, r);
                 }
@@ -365,8 +340,6 @@ impl State {
                 }
             }
             opcodes::INPUT => {
-                let c = Reg::try_from(8 + c).unwrap();
-
                 gen::mov32_r_rm(buf, c, Reg::Ax);
                 for &r in VOLATILE_REGS {
                     if r != Reg::Ax {
@@ -388,8 +361,6 @@ impl State {
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
-                let c = Reg::try_from(8 + c).unwrap();
-                let b = Reg::try_from(8 + b).unwrap();
 
                 gen::jmp_indirect(buf, Mem2::base(Reg::Si).index_scale(c, 8));
                 gen::mov64_r_rm(buf, Reg::Ax, c);
@@ -430,7 +401,7 @@ impl State {
             }
             _ => panic!("op: {}", op),
         }
-        self.stats.ops[op as usize].code_len += end_ptr as usize - self.exe_buf.cur_pos() as usize;
+        self.stats.ops[op as usize].code_len += end_ptr as usize - buf.cur_pos() as usize;
     }
 
     extern "win64" fn compile(&mut self, finger: u32) {
