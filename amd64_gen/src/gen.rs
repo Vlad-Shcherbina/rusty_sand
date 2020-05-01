@@ -1,7 +1,8 @@
 use super::*;
 
 // return r, x, b bits of REX prefix
-fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: RegOrMem2) -> u8 {
+fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: impl Into<RegOrMem2>) -> u8 {
+    let rm: RegOrMem2 = rm.into();
     let r1 = r1 as u8;
     let r1_modrm = (r1 & 7) << 3;
     let r1_rex = (r1 & 8) >> 1;
@@ -49,7 +50,6 @@ fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: RegOrMem2) -> u8 {
 }
 
 pub fn mov32_r_rm(sink: &mut impl CodeSink, r: Reg, rm: impl Into<RegOrMem2>) {
-    let rm: RegOrMem2 = rm.into();
     let rex = encode_modrm(sink, r, rm);
     sink.prepend(&[0x8B]);
     if rex != 0 {
@@ -58,13 +58,11 @@ pub fn mov32_r_rm(sink: &mut impl CodeSink, r: Reg, rm: impl Into<RegOrMem2>) {
 }
 
 pub fn mov64_r_rm(sink: &mut impl CodeSink, r: Reg, rm: impl Into<RegOrMem2>) {
-    let rm: RegOrMem2 = rm.into();
     let rex = encode_modrm(sink, r, rm);
     sink.prepend(&[rex | 0x48, 0x8B]);
 }
 
 pub fn mov32_rm_r(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, r: Reg) {
-    let rm: RegOrMem2 = rm.into();
     let rex = encode_modrm(sink, r, rm);
     sink.prepend(&[0x89]);
     if rex != 0 {
@@ -73,13 +71,11 @@ pub fn mov32_rm_r(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, r: Reg) {
 }
 
 pub fn mov64_rm_r(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, r: Reg) {
-    let rm: RegOrMem2 = rm.into();
     let rex = encode_modrm(sink, r, rm);
     sink.prepend(&[rex | 0x48, 0x89]);
 }
 
 pub fn mov32_imm(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, imm: i32) {
-    let rm: RegOrMem2 = rm.into();
     sink.prepend(&imm.to_le_bytes());
     let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
     sink.prepend(&[0xc7]);
@@ -89,7 +85,6 @@ pub fn mov32_imm(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, imm: i32) {
 }
 
 pub fn mov64_imm(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>, imm: i32) {
-    let rm: RegOrMem2 = rm.into();
     sink.prepend(&imm.to_le_bytes());
     let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
     sink.prepend(&[rex | 0x48, 0xc7]);
