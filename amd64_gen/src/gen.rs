@@ -158,6 +158,22 @@ pub fn mul_op64(sink: &mut impl CodeSink, op: MulOp, rm: impl Into<RegOrMem2>) {
     sink.prepend(&[rex | 0x48, 0xf7]);
 }
 
+pub fn push64(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>) {
+    let rex = encode_modrm(sink, 6.try_into().unwrap(), rm);
+    sink.prepend(&[0xff]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
+pub fn pop64(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>) {
+    let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
+    sink.prepend(&[0x8f]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,6 +410,21 @@ mod tests {
         expect_disasm(&code, &[
             (b"\x49\xf7\xf2", "div    r10"),
             (b"\x41\xf7\xea", "imul   r10d"),
+        ]);
+    }
+
+    #[test]
+    fn push_pop() {
+        let mut code = Vec::<u8>::new();
+        gen::push64(&mut code, Reg::Cx);
+        gen::push64(&mut code, Mem2::base(Reg::R15));
+        gen::pop64(&mut code, Mem2::base(Reg::R15));
+        gen::pop64(&mut code, Reg::Cx);
+        expect_disasm(&code, &[
+            (b"\x8f\xc1",                     "pop    rcx"),
+            (b"\x41\x8f\x87\x00\x00\x00\x00", "pop    QWORD PTR [r15+0x0]"),
+            (b"\x41\xff\xb7\x00\x00\x00\x00", "push   QWORD PTR [r15+0x0]"),
+            (b"\xff\xf1",                     "push   rcx"),
         ]);
     }
 
