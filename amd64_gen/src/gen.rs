@@ -220,6 +220,10 @@ pub fn call_indirect(sink: &mut impl CodeSink, target: impl Into<RegOrMem2>) {
     }
 }
 
+pub fn ret(sink: &mut impl CodeSink) {
+    sink.prepend(&[0xc3]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,6 +554,15 @@ mod tests {
         expect_disasm(&code, &[
             (b"\x41\xff\x96\x00\x00\x00\x00", "call   QWORD PTR [r14+0x0]"),
             (b"\xff\xe1",                     "jmp    rcx"),
+        ]);
+    }
+
+    #[test]
+    fn ret() {
+        let mut code = Vec::<u8>::new();
+        gen::ret(&mut code);
+        expect_disasm(&code, &[
+            (b"\xc3", "ret"),
         ]);
     }
 
