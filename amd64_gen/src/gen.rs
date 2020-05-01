@@ -18,8 +18,13 @@ fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: RegOrMem2) -> u8 {
         }
         RegOrMem2::Mem(Mem2 { base, index_scale: None, disp }) => {
             let base = base as u8;
-            sink.prepend(&disp.to_le_bytes());
-            sink.prepend(&[0b10_000_000 | r1_modrm | (base & 7)]);
+            if base & 7 != 4 {
+                sink.prepend(&disp.to_le_bytes());
+                sink.prepend(&[0b10_000_000 | r1_modrm | (base & 7)]);
+            } else {
+                sink.prepend(&disp.to_le_bytes());
+                sink.prepend(&[0b10_000_100 | r1_modrm, 0b00_100_100]);
+            }
             r1_rex | base >> 3
         }
         _ => todo!()
@@ -180,26 +185,25 @@ mod tests {
     fn base_only() {
         let mut code = Vec::<u8>::new();
         for base in Reg::all() {
-            if base as u8 & 7 == 4 {
-                continue;  // TODO
-            }
-            gen::mov32_r_rm(&mut code, Reg::Ax, Mem2::base(base));
+            gen::mov32_r_rm(&mut code, Reg::Cx, Mem2::base(base));
         }
         expect_disasm(&code, &[
-            (b"\x41\x8b\x87\x00\x00\x00\x00", "mov    eax,DWORD PTR [r15+0x0]"),
-            (b"\x41\x8b\x86\x00\x00\x00\x00", "mov    eax,DWORD PTR [r14+0x0]"),
-            (b"\x41\x8b\x85\x00\x00\x00\x00", "mov    eax,DWORD PTR [r13+0x0]"),
-            (b"\x41\x8b\x83\x00\x00\x00\x00", "mov    eax,DWORD PTR [r11+0x0]"),
-            (b"\x41\x8b\x82\x00\x00\x00\x00", "mov    eax,DWORD PTR [r10+0x0]"),
-            (b"\x41\x8b\x81\x00\x00\x00\x00", "mov    eax,DWORD PTR [r9+0x0]"),
-            (b"\x41\x8b\x80\x00\x00\x00\x00", "mov    eax,DWORD PTR [r8+0x0]"),
-            (b"\x8b\x87\x00\x00\x00\x00",     "mov    eax,DWORD PTR [rdi+0x0]"),
-            (b"\x8b\x86\x00\x00\x00\x00",     "mov    eax,DWORD PTR [rsi+0x0]"),
-            (b"\x8b\x85\x00\x00\x00\x00",     "mov    eax,DWORD PTR [rbp+0x0]"),
-            (b"\x8b\x83\x00\x00\x00\x00",     "mov    eax,DWORD PTR [rbx+0x0]"),
-            (b"\x8b\x82\x00\x00\x00\x00",     "mov    eax,DWORD PTR [rdx+0x0]"),
-            (b"\x8b\x81\x00\x00\x00\x00",     "mov    eax,DWORD PTR [rcx+0x0]"),
-            (b"\x8b\x80\x00\x00\x00\x00",     "mov    eax,DWORD PTR [rax+0x0]"),
+            (b"\x41\x8b\x8f\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r15+0x0]"),
+            (b"\x41\x8b\x8e\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r14+0x0]"),
+            (b"\x41\x8b\x8d\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r13+0x0]"),
+            (b"\x41\x8b\x8c\x24\x00\x00\x00\x00", "mov    ecx,DWORD PTR [r12+0x0]"),
+            (b"\x41\x8b\x8b\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r11+0x0]"),
+            (b"\x41\x8b\x8a\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r10+0x0]"),
+            (b"\x41\x8b\x89\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r9+0x0]"),
+            (b"\x41\x8b\x88\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r8+0x0]"),
+            (b"\x8b\x8f\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rdi+0x0]"),
+            (b"\x8b\x8e\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rsi+0x0]"),
+            (b"\x8b\x8d\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rbp+0x0]"),
+            (b"\x8b\x8c\x24\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [rsp+0x0]"),
+            (b"\x8b\x8b\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rbx+0x0]"),
+            (b"\x8b\x8a\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rdx+0x0]"),
+            (b"\x8b\x89\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rcx+0x0]"),
+            (b"\x8b\x88\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rax+0x0]"),
         ]);
     }
 }
