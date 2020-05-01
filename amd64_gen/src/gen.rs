@@ -104,6 +104,47 @@ pub fn lea64(sink: &mut impl CodeSink, r: Reg, m: impl Into<RegOrMem2> + Copy) {
     sink.prepend(&[rex | 0x48, 0x8d]);
 }
 
+pub fn binop32_r_rm(sink: &mut impl CodeSink, op: Binop, r: Reg, rm: impl Into<RegOrMem2>) {
+    let rex = encode_modrm(sink, r, rm);
+    sink.prepend(&[op as u8 * 8 + 3]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
+pub fn binop64_r_rm(sink: &mut impl CodeSink, op: Binop, r: Reg, rm: impl Into<RegOrMem2>) {
+    let rex = encode_modrm(sink, r, rm);
+    sink.prepend(&[rex | 0x48, op as u8 * 8 + 3]);
+}
+
+pub fn binop32_rm_r(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem2>, r: Reg) {
+    let rex = encode_modrm(sink, r, rm);
+    sink.prepend(&[op as u8 * 8 + 1]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
+pub fn binop64_rm_r(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem2>, r: Reg) {
+    let rex = encode_modrm(sink, r, rm);
+    sink.prepend(&[rex | 0x48, op as u8 * 8 + 1]);
+}
+
+pub fn binop32_imm(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem2>, imm: i32) {
+    sink.prepend(&imm.to_le_bytes());
+    let rex = encode_modrm(sink, (op as u8).try_into().unwrap(), rm);
+    sink.prepend(&[0x81]);
+    if rex != 0 {
+        sink.prepend(&[rex | 0x40]);
+    }
+}
+
+pub fn binop64_imm(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem2>, imm: i32) {
+    sink.prepend(&imm.to_le_bytes());
+    let rex = encode_modrm(sink, (op as u8).try_into().unwrap(), rm);
+    sink.prepend(&[rex | 0x48, 0x81]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +298,55 @@ mod tests {
         expect_disasm(&code, &[
             (b"\x48\x8d\x0d\x42\x00\x00\x00", "lea    rcx,[rip+0x42]"),
             (b"\x49\x8d\x8b\x00\x00\x00\x00", "lea    rcx,[r11+0x0]"),
+        ]);
+    }
+
+    #[test]
+    fn binop_names() {
+        let mut code = Vec::<u8>::new();
+        let mut expected_texts = Vec::new();
+        for &op in &[
+            Binop::Add, Binop::Or, Binop::Adc, Binop::Sbb,
+            Binop::And, Binop::Sub, Binop::Xor, Binop::Cmp,
+        ] {
+            gen::binop32_r_rm(&mut code, op, Reg::Dx, Reg::Ax);
+            let mut op_name = format!("{:?}", op);
+            op_name.make_ascii_lowercase();
+            expected_texts.push(format!("{:3}    edx,eax", op_name));
+        }
+        let expected: &[(&[u8], &str)] = &[
+            (b"\x3b\xd0", "cmp    edx,eax"),
+            (b"\x33\xd0", "xor    edx,eax"),
+            (b"\x2b\xd0", "sub    edx,eax"),
+            (b"\x23\xd0", "and    edx,eax"),
+            (b"\x1b\xd0", "sbb    edx,eax"),
+            (b"\x13\xd0", "adc    edx,eax"),
+            (b"\x0b\xd0", "or     edx,eax"),
+            (b"\x03\xd0", "add    edx,eax"),
+        ];
+        expect_disasm(&code, expected);
+        assert_eq!(expected_texts.len(), expected.len());
+        for (et, &(_, t)) in expected_texts.iter().rev().zip(expected) {
+            assert_eq!(et, t);
+        }
+    }
+
+    #[test]
+    fn binop() {
+        let mut code = Vec::<u8>::new();
+        gen::binop32_r_rm(&mut code, Binop::Or, Reg::Ax, Reg::Bx);
+        gen::binop32_rm_r(&mut code, Binop::Or, Reg::Ax, Reg::Bx);
+        gen::binop64_r_rm(&mut code, Binop::Xor, Reg::Ax, Reg::Bx);
+        gen::binop64_rm_r(&mut code, Binop::Xor, Reg::Ax, Reg::Bx);
+        gen::binop32_imm(&mut code, Binop::Sub, Reg::Cx, 0x42);
+        gen::binop64_imm(&mut code, Binop::Sbb, Reg::Cx, 0x42);
+        expect_disasm(&code, &[
+            (b"\x48\x81\xd9\x42\x00\x00\x00", "sbb    rcx,0x42"),
+            (b"\x81\xe9\x42\x00\x00\x00",     "sub    ecx,0x42"),
+            (b"\x48\x31\xd8",                 "xor    rax,rbx"),
+            (b"\x48\x33\xc3",                 "xor    rax,rbx"),
+            (b"\x09\xd8",                     "or     eax,ebx"),
+            (b"\x0b\xc3",                     "or     eax,ebx"),
         ]);
     }
 
