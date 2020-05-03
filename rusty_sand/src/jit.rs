@@ -262,20 +262,16 @@ impl State {
                 gen::mov32_r_rm(buf, Reg::Ax, b);
             }
             opcodes::MULTIPLICATION => {
-                gen::pop64(buf, Reg::Dx);
                 gen::mov32_r_rm(buf, a, Reg::Ax);
                 gen::mul_op32(buf, MulOp::Mul, c);
                 gen::mov32_r_rm(buf, Reg::Ax, b);
-                gen::push64(buf, Reg::Dx);
             }
             opcodes::DIVISION => {
                 // TODO: maybe explicitly fail on division by zero?
-                gen::pop64(buf, Reg::Dx);
                 gen::mov32_r_rm(buf, a, Reg::Ax);
                 gen::mul_op32(buf, MulOp::Div, c);
                 gen::mov32_r_rm(buf, Reg::Ax, b);
-                gen::mov32_imm(buf, Reg::Dx, 0);  // TODO: xor edx, edx
-                gen::push64(buf, Reg::Dx);
+                gen::binop32_r_rm(buf, Binop::Xor, Reg::Dx, Reg::Dx);
             }
             opcodes::NOT_AND => {
                 gen::mov32_r_rm(buf, a, Reg::Ax);
