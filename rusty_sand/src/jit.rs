@@ -200,18 +200,13 @@ impl State {
                 // TODO: bounds check
 
                 // lea rax, [b + 2 * b]
-                // mov rcx, self.arrays.ptr
-                // mov rax, [rcx + 8 * rax + VEC_PTR_OFFSET]
+                // mov rax, [self.arrays.ptr + 8 * rax + VEC_PTR_OFFSET]
                 // mov a, [rax + 4 * c]
                 assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
                 gen::mov32_r_rm(buf, a, Mem2::base(Reg::Ax).index_scale(c, 4));
                 gen::mov64_r_rm(buf, Reg::Ax,
-                    Mem2::base(Reg::Cx).index_scale(Reg::Ax, 8)
+                    Mem2::base(Reg::Di).index_scale(Reg::Ax, 8)
                     .disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
-                gen::mov64_r_rm(buf, Reg::Cx,
-                    Mem2::base(Reg::Bx).disp(i32::try_from(
-                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET
-                    ).unwrap()));
                 gen::lea64(buf, Reg::Ax, Mem2::base(b).index_scale(b, 2));
             }
             opcodes::ARRAY_AMENDMENT => {
@@ -243,16 +238,12 @@ impl State {
                 // self.arrays[a][b] <- c
                 //    or
                 // lea rax, [a + 2 * a]
-                // mov rcx, self.arrays.ptr
-                // mov rax, [rcx + 8 * rax + VEC_PTR_OFFSET]
+                // mov rax, [self.arrays.ptr + 8 * rax + VEC_PTR_OFFSET]
                 // mov [rax + 4 * b], c
                 assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
                 gen::mov32_rm_r(buf, Mem2::base(Reg::Ax).index_scale(b, 4), c);
                 gen::mov64_r_rm(buf, Reg::Ax,
-                    Mem2::base(Reg::Cx).index_scale(Reg::Ax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
-                gen::mov64_r_rm(buf, Reg::Cx,
-                    Mem2::base(Reg::Bx).disp(i32::try_from(
-                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()));
+                    Mem2::base(Reg::Di).index_scale(Reg::Ax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
                 gen::lea64(buf, Reg::Ax, Mem2::base(a).index_scale(a, 2));
             }
             opcodes::ADDITION => {
@@ -288,6 +279,11 @@ impl State {
                     i32::try_from(pos + 1).unwrap());
             }
             opcodes::ALLOCATION => {
+                // update rdi in case self.arrays was reallocated
+                gen::mov64_r_rm(buf, Reg::Di,
+                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                        memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()));
+
                 // b <- call self.allocation(c)
                 gen::mov32_r_rm(buf, b, Reg::Ax);
 
@@ -372,7 +368,9 @@ impl State {
                 fail_code(buf, "LOAD_PROGRAM: c >= arrays[0].len()\0");
                 gen::jmp_cond(buf, Cond::B,
                     i32::try_from(no_fail as usize - buf.cur_pos() as usize).unwrap());
-                gen::binop64_r_rm(buf, Binop::Cmp, c, Reg::Di);
+                gen::binop64_r_rm(buf, Binop::Cmp, c,
+                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                        memoffset::offset_of!(State, jump_locations) + VEC_LEN_OFFSET).unwrap()));
 
                 let no_switch_code = buf.cur_pos();
 
@@ -380,10 +378,6 @@ impl State {
                 gen::mov64_r_rm(buf, Reg::Si,
                     Mem2::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, jump_locations) + VEC_PTR_OFFSET).unwrap()));
-                // rdi <- jump_locations.len
-                gen::mov64_r_rm(buf, Reg::Di,
-                    Mem2::base(Reg::Bx).disp(i32::try_from(
-                        memoffset::offset_of!(State, jump_locations) + VEC_LEN_OFFSET).unwrap()));
 
                 gen::pop64(buf, Reg::Ax);
                 gen::pop64(buf, Reg::R8);
@@ -486,8 +480,8 @@ impl State {
     pub fn run(&mut self) {
         assert!((self.finger as usize) < self.jump_locations.len());
         // regs[] -> r08..r15
-        // jump_locations, len -> (rsi, rdi)
-        // arrays -> some reg TODO
+        // jump_locations -> rsi
+        // arrays.ptr -> rdi
         // jit_trampoline -> rbp (for fast comparisons)
         // finger -> rax
         // self -> rbx
@@ -511,7 +505,7 @@ impl State {
             :
               "{rbx}"(self as *mut _),
               "{rsi}"(self.jump_locations.as_ptr()),
-              "{rdi}"(self.jump_locations.len()),
+              "{rdi}"(self.arrays.as_ptr()),
               "{rbp}"(jit_trampoline as usize),
               "{rax}"(self.finger),
               "{r8d}"(self.regs[0]),
