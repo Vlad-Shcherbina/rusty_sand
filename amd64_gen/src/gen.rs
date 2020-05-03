@@ -19,6 +19,7 @@ fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: impl Into<RegOrMem2>) -> 
         }
         RegOrMem2::Mem(Mem2 { base, index_scale: None, disp }) => {
             let base = base as u8;
+            #[allow(clippy::identity_op)]
             match i8::try_from(disp) {
                 Ok(0) if base & 7 != 4 && base & 7 != 5 =>
                     sink.prepend(&[0b00_000_000 | r1_modrm | (base & 7)]),
@@ -182,6 +183,8 @@ pub fn push64(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>) {
     let rex = encode_modrm(sink, 6.try_into().unwrap(), rm);
     sink.prepend(&[0xff]);
     if rex != 0 {
+        // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
+        // no need to set it
         sink.prepend(&[rex | 0x40]);
     }
 }
@@ -190,6 +193,8 @@ pub fn pop64(sink: &mut impl CodeSink, rm: impl Into<RegOrMem2>) {
     let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
     sink.prepend(&[0x8f]);
     if rex != 0 {
+        // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
+        // no need to set it
         sink.prepend(&[rex | 0x40]);
     }
 }
