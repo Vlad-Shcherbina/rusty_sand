@@ -102,7 +102,7 @@ unsafe fn jit_trampoline() {
     mov rcx, rbx  // arg1 = self
     mov edx, eax  // finger
     sub rsp, 0x20
-    call rbp  // state.compile(finger)
+    call $0  // state.compile(finger)
     add rsp, 0x20
 
     // pop all win64 volatile registers
@@ -117,7 +117,7 @@ unsafe fn jit_trampoline() {
     // resume execution of the compiled code
     jmp [rsi + 8 * rax]
     "
-    : : "{rbp}"(State::compile as usize) : : "intel");
+    : : "i"(State::compile as usize) : : "intel");
 }
 
 extern "win64" fn output(c: u32) {
@@ -232,9 +232,8 @@ impl State {
                     i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap());
                 gen::binop64_rm_r(buf, Binop::Cmp,
                     Mem2::base(Reg::Si).index_scale(b, 8),
-                    Reg::Ax,
+                    Reg::Bp,
                 );
-                gen::movabs64_imm(buf, Reg::Ax, jit_trampoline as usize as i64);
 
                 // if a != 0 goto skip
                 gen::jmp_cond(buf, Cond::Ne,
