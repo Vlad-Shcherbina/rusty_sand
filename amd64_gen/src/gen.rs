@@ -730,4 +730,108 @@ mod tests {
             assert_eq!(et, t);
         }
     }
+
+    #[test]
+    fn sib_combinations_disp8() {
+        let bases = [Reg::Ax, Reg::Sp, Reg::Bp, Reg::R12, Reg::R13, Reg::R15];
+        let indexes = [Reg::Ax, Reg::Bp, Reg::R12, Reg::R13, Reg::R15];
+        let mut code = Vec::<u8>::new();
+        let mut expected_texts = Vec::new();
+        for &base in &bases {
+            for &index in &indexes {
+                gen::mov32_r_rm(&mut code, Reg::Bx, Mem2::base(base).index_scale(index, 2).disp(-5));
+                expected_texts.push(
+                    format!("mov    ebx,DWORD PTR [{}+{}*2-0x5]", base.name64(), index.name64()));
+            }
+        }
+        let expected: &[(&[u8], &str)] = &[
+            (b"\x43\x8b\x9c\x7f\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+r15*2-0x5]"),
+            (b"\x43\x8b\x9c\x6f\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+r13*2-0x5]"),
+            (b"\x43\x8b\x9c\x67\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+r12*2-0x5]"),
+            (b"\x41\x8b\x9c\x6f\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+rbp*2-0x5]"),
+            (b"\x41\x8b\x9c\x47\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+rax*2-0x5]"),
+            (b"\x43\x8b\x9c\x7d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+r15*2-0x5]"),
+            (b"\x43\x8b\x9c\x6d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+r13*2-0x5]"),
+            (b"\x43\x8b\x9c\x65\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+r12*2-0x5]"),
+            (b"\x41\x8b\x9c\x6d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+rbp*2-0x5]"),
+            (b"\x41\x8b\x9c\x45\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+rax*2-0x5]"),
+            (b"\x43\x8b\x9c\x7c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+r15*2-0x5]"),
+            (b"\x43\x8b\x9c\x6c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+r13*2-0x5]"),
+            (b"\x43\x8b\x9c\x64\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+r12*2-0x5]"),
+            (b"\x41\x8b\x9c\x6c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+rbp*2-0x5]"),
+            (b"\x41\x8b\x9c\x44\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+rax*2-0x5]"),
+            (b"\x42\x8b\x9c\x7d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rbp+r15*2-0x5]"),
+            (b"\x42\x8b\x9c\x6d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rbp+r13*2-0x5]"),
+            (b"\x42\x8b\x9c\x65\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rbp+r12*2-0x5]"),
+            (b"\x8b\x9c\x6d\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rbp+rbp*2-0x5]"),
+            (b"\x8b\x9c\x45\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rbp+rax*2-0x5]"),
+            (b"\x42\x8b\x9c\x7c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rsp+r15*2-0x5]"),
+            (b"\x42\x8b\x9c\x6c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rsp+r13*2-0x5]"),
+            (b"\x42\x8b\x9c\x64\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rsp+r12*2-0x5]"),
+            (b"\x8b\x9c\x6c\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rsp+rbp*2-0x5]"),
+            (b"\x8b\x9c\x44\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rsp+rax*2-0x5]"),
+            (b"\x42\x8b\x9c\x78\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rax+r15*2-0x5]"),
+            (b"\x42\x8b\x9c\x68\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rax+r13*2-0x5]"),
+            (b"\x42\x8b\x9c\x60\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rax+r12*2-0x5]"),
+            (b"\x8b\x9c\x68\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rax+rbp*2-0x5]"),
+            (b"\x8b\x9c\x40\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rax+rax*2-0x5]"),
+        ];
+        expect_disasm(&code, expected);
+        assert_eq!(expected_texts.len(), expected.len());
+        for (et, &(_, t)) in expected_texts.iter().rev().zip(expected) {
+            assert_eq!(et, t);
+        }
+    }
+
+    #[test]
+    fn sib_combinations_disp32() {
+        let bases = [Reg::Ax, Reg::Sp, Reg::Bp, Reg::R12, Reg::R13, Reg::R15];
+        let indexes = [Reg::Ax, Reg::Bp, Reg::R12, Reg::R13, Reg::R15];
+        let mut code = Vec::<u8>::new();
+        let mut expected_texts = Vec::new();
+        for &base in &bases {
+            for &index in &indexes {
+                gen::mov32_r_rm(&mut code, Reg::Bx, Mem2::base(base).index_scale(index, 2).disp(-0x333));
+                expected_texts.push(
+                    format!("mov    ebx,DWORD PTR [{}+{}*2-0x333]", base.name64(), index.name64()));
+            }
+        }
+        let expected: &[(&[u8], &str)] = &[
+            (b"\x43\x8b\x9c\x7f\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r15+r15*2-0x333]"),
+            (b"\x43\x8b\x9c\x6f\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r15+r13*2-0x333]"),
+            (b"\x43\x8b\x9c\x67\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r15+r12*2-0x333]"),
+            (b"\x41\x8b\x9c\x6f\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r15+rbp*2-0x333]"),
+            (b"\x41\x8b\x9c\x47\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r15+rax*2-0x333]"),
+            (b"\x43\x8b\x9c\x7d\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r13+r15*2-0x333]"),
+            (b"\x43\x8b\x9c\x6d\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r13+r13*2-0x333]"),
+            (b"\x43\x8b\x9c\x65\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r13+r12*2-0x333]"),
+            (b"\x41\x8b\x9c\x6d\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r13+rbp*2-0x333]"),
+            (b"\x41\x8b\x9c\x45\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r13+rax*2-0x333]"),
+            (b"\x43\x8b\x9c\x7c\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r12+r15*2-0x333]"),
+            (b"\x43\x8b\x9c\x6c\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r12+r13*2-0x333]"),
+            (b"\x43\x8b\x9c\x64\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r12+r12*2-0x333]"),
+            (b"\x41\x8b\x9c\x6c\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r12+rbp*2-0x333]"),
+            (b"\x41\x8b\x9c\x44\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [r12+rax*2-0x333]"),
+            (b"\x42\x8b\x9c\x7d\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rbp+r15*2-0x333]"),
+            (b"\x42\x8b\x9c\x6d\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rbp+r13*2-0x333]"),
+            (b"\x42\x8b\x9c\x65\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rbp+r12*2-0x333]"),
+            (b"\x8b\x9c\x6d\xcd\xfc\xff\xff",     "mov    ebx,DWORD PTR [rbp+rbp*2-0x333]"),
+            (b"\x8b\x9c\x45\xcd\xfc\xff\xff",     "mov    ebx,DWORD PTR [rbp+rax*2-0x333]"),
+            (b"\x42\x8b\x9c\x7c\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rsp+r15*2-0x333]"),
+            (b"\x42\x8b\x9c\x6c\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rsp+r13*2-0x333]"),
+            (b"\x42\x8b\x9c\x64\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rsp+r12*2-0x333]"),
+            (b"\x8b\x9c\x6c\xcd\xfc\xff\xff",     "mov    ebx,DWORD PTR [rsp+rbp*2-0x333]"),
+            (b"\x8b\x9c\x44\xcd\xfc\xff\xff",     "mov    ebx,DWORD PTR [rsp+rax*2-0x333]"),
+            (b"\x42\x8b\x9c\x78\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rax+r15*2-0x333]"),
+            (b"\x42\x8b\x9c\x68\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rax+r13*2-0x333]"),
+            (b"\x42\x8b\x9c\x60\xcd\xfc\xff\xff", "mov    ebx,DWORD PTR [rax+r12*2-0x333]"),
+            (b"\x8b\x9c\x68\xcd\xfc\xff\xff",     "mov    ebx,DWORD PTR [rax+rbp*2-0x333]"),
+            (b"\x8b\x9c\x40\xcd\xfc\xff\xff",     "mov    ebx,DWORD PTR [rax+rax*2-0x333]"),
+        ];
+        expect_disasm(&code, expected);
+        assert_eq!(expected_texts.len(), expected.len());
+        for (et, &(_, t)) in expected_texts.iter().rev().zip(expected) {
+            assert_eq!(et, t);
+        }
+    }
 }
