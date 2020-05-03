@@ -19,12 +19,23 @@ fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: impl Into<RegOrMem2>) -> 
         }
         RegOrMem2::Mem(Mem2 { base, index_scale: None, disp }) => {
             let base = base as u8;
-            if base & 7 != 4 {
-                sink.prepend(&disp.to_le_bytes());
-                sink.prepend(&[0b10_000_000 | r1_modrm | (base & 7)]);
-            } else {
-                sink.prepend(&disp.to_le_bytes());
-                sink.prepend(&[0b10_000_100 | r1_modrm, 0b00_100_100]);
+            match i8::try_from(disp) {
+                Ok(0) if base & 7 != 4 && base & 7 != 5 =>
+                    sink.prepend(&[0b00_000_000 | r1_modrm | (base & 7)]),
+                Ok(disp) =>
+                    if base & 7 != 4 {
+                        sink.prepend(&[0b01_000_000 | r1_modrm | (base & 7), disp as u8]);
+                    } else {
+                        sink.prepend(&[0b01_000_100 | r1_modrm, 0b00_100_100, disp as u8]);
+                    }
+                Err(_) =>
+                    if base & 7 != 4 {
+                        sink.prepend(&disp.to_le_bytes());
+                        sink.prepend(&[0b10_000_000 | r1_modrm | (base & 7)]);
+                    } else {
+                        sink.prepend(&disp.to_le_bytes());
+                        sink.prepend(&[0b10_000_100 | r1_modrm, 0b00_100_100]);
+                    }
             }
             r1_rex | base >> 3
         }
@@ -340,8 +351,8 @@ mod tests {
         gen::mov32_r_rm(&mut code, Reg::Bx, Mem2::base(Reg::Si));
         gen::mov32_rm_r(&mut code, Mem2::base(Reg::R8), Reg::R11);
         expect_disasm(&code, &[
-            (b"\x45\x89\x98\x00\x00\x00\x00", "mov    DWORD PTR [r8+0x0],r11d"),
-            (b"\x8b\x9e\x00\x00\x00\x00",     "mov    ebx,DWORD PTR [rsi+0x0]"),
+            (b"\x45\x89\x18", "mov    DWORD PTR [r8],r11d"),
+            (b"\x8b\x1e",     "mov    ebx,DWORD PTR [rsi]"),
         ]);
     }
 
@@ -352,9 +363,9 @@ mod tests {
         gen::mov32_imm(&mut code, Mem2::base(Reg::R11), 0x42);
         gen::mov64_imm(&mut code, Reg::Dx, -2);
         expect_disasm(&code, &[
-            (b"\x48\xc7\xc2\xfe\xff\xff\xff",                 "mov    rdx,0xfffffffffffffffe"),
-            (b"\x41\xc7\x83\x00\x00\x00\x00\x42\x00\x00\x00", "mov    DWORD PTR [r11+0x0],0x42"),
-            (b"\x41\xc7\xc1\x42\x00\x00\x00",                 "mov    r9d,0x42"),
+            (b"\x48\xc7\xc2\xfe\xff\xff\xff", "mov    rdx,0xfffffffffffffffe"),
+            (b"\x41\xc7\x03\x42\x00\x00\x00", "mov    DWORD PTR [r11],0x42"),
+            (b"\x41\xc7\xc1\x42\x00\x00\x00", "mov    r9d,0x42"),
         ]);
     }
 
@@ -376,7 +387,7 @@ mod tests {
         gen::lea64(&mut code, Reg::Cx, RipRel(0x42));
         expect_disasm(&code, &[
             (b"\x48\x8d\x0d\x42\x00\x00\x00", "lea    rcx,[rip+0x42]"),
-            (b"\x49\x8d\x8b\x00\x00\x00\x00", "lea    rcx,[r11+0x0]"),
+            (b"\x49\x8d\x0b",                 "lea    rcx,[r11]"),
         ]);
     }
 
@@ -471,10 +482,10 @@ mod tests {
         gen::pop64(&mut code, Mem2::base(Reg::R15));
         gen::pop64(&mut code, Reg::Cx);
         expect_disasm(&code, &[
-            (b"\x8f\xc1",                     "pop    rcx"),
-            (b"\x41\x8f\x87\x00\x00\x00\x00", "pop    QWORD PTR [r15+0x0]"),
-            (b"\x41\xff\xb7\x00\x00\x00\x00", "push   QWORD PTR [r15+0x0]"),
-            (b"\xff\xf1",                     "push   rcx"),
+            (b"\x8f\xc1",     "pop    rcx"),
+            (b"\x41\x8f\x07", "pop    QWORD PTR [r15]"),
+            (b"\x41\xff\x37", "push   QWORD PTR [r15]"),
+            (b"\xff\xf1",     "push   rcx"),
         ]);
     }
 
@@ -552,8 +563,8 @@ mod tests {
         gen::jmp_indirect(&mut code, Reg::Cx);
         gen::call_indirect(&mut code, Mem2::base(Reg::R14));
         expect_disasm(&code, &[
-            (b"\x41\xff\x96\x00\x00\x00\x00", "call   QWORD PTR [r14+0x0]"),
-            (b"\xff\xe1",                     "jmp    rcx"),
+            (b"\x41\xff\x16", "call   QWORD PTR [r14]"),
+            (b"\xff\xe1",     "jmp    rcx"),
         ]);
     }
 
@@ -583,45 +594,53 @@ mod tests {
             gen::mov32_r_rm(&mut code, Reg::Cx, Mem2::base(base));
         }
         expect_disasm(&code, &[
-            (b"\x41\x8b\x8f\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r15+0x0]"),
-            (b"\x41\x8b\x8e\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r14+0x0]"),
-            (b"\x41\x8b\x8d\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r13+0x0]"),
-            (b"\x41\x8b\x8c\x24\x00\x00\x00\x00", "mov    ecx,DWORD PTR [r12+0x0]"),
-            (b"\x41\x8b\x8b\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r11+0x0]"),
-            (b"\x41\x8b\x8a\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r10+0x0]"),
-            (b"\x41\x8b\x89\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r9+0x0]"),
-            (b"\x41\x8b\x88\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [r8+0x0]"),
-            (b"\x8b\x8f\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rdi+0x0]"),
-            (b"\x8b\x8e\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rsi+0x0]"),
-            (b"\x8b\x8d\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rbp+0x0]"),
-            (b"\x8b\x8c\x24\x00\x00\x00\x00",     "mov    ecx,DWORD PTR [rsp+0x0]"),
-            (b"\x8b\x8b\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rbx+0x0]"),
-            (b"\x8b\x8a\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rdx+0x0]"),
-            (b"\x8b\x89\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rcx+0x0]"),
-            (b"\x8b\x88\x00\x00\x00\x00",         "mov    ecx,DWORD PTR [rax+0x0]"),
+            (b"\x41\x8b\x0f",         "mov    ecx,DWORD PTR [r15]"),
+            (b"\x41\x8b\x0e",         "mov    ecx,DWORD PTR [r14]"),
+            (b"\x41\x8b\x4d\x00",     "mov    ecx,DWORD PTR [r13+0x0]"),
+            (b"\x41\x8b\x4c\x24\x00", "mov    ecx,DWORD PTR [r12+0x0]"),
+            (b"\x41\x8b\x0b",         "mov    ecx,DWORD PTR [r11]"),
+            (b"\x41\x8b\x0a",         "mov    ecx,DWORD PTR [r10]"),
+            (b"\x41\x8b\x09",         "mov    ecx,DWORD PTR [r9]"),
+            (b"\x41\x8b\x08",         "mov    ecx,DWORD PTR [r8]"),
+            (b"\x8b\x0f",             "mov    ecx,DWORD PTR [rdi]"),
+            (b"\x8b\x0e",             "mov    ecx,DWORD PTR [rsi]"),
+            (b"\x8b\x4d\x00",         "mov    ecx,DWORD PTR [rbp+0x0]"),
+            (b"\x8b\x4c\x24\x00",     "mov    ecx,DWORD PTR [rsp+0x0]"),
+            (b"\x8b\x0b",             "mov    ecx,DWORD PTR [rbx]"),
+            (b"\x8b\x0a",             "mov    ecx,DWORD PTR [rdx]"),
+            (b"\x8b\x09",             "mov    ecx,DWORD PTR [rcx]"),
+            (b"\x8b\x08",             "mov    ecx,DWORD PTR [rax]"),
         ]);
+    }
+
+    #[test]
+    fn base_only_disp8() {
         let mut code = Vec::<u8>::new();
         for base in Reg::all() {
             gen::mov32_r_rm(&mut code, Reg::Cx, Mem2::base(base).disp(5));
         }
         expect_disasm(&code, &[
-            (b"\x41\x8b\x8f\x05\x00\x00\x00",     "mov    ecx,DWORD PTR [r15+0x5]"),
-            (b"\x41\x8b\x8e\x05\x00\x00\x00",     "mov    ecx,DWORD PTR [r14+0x5]"),
-            (b"\x41\x8b\x8d\x05\x00\x00\x00",     "mov    ecx,DWORD PTR [r13+0x5]"),
-            (b"\x41\x8b\x8c\x24\x05\x00\x00\x00", "mov    ecx,DWORD PTR [r12+0x5]"),
-            (b"\x41\x8b\x8b\x05\x00\x00\x00",     "mov    ecx,DWORD PTR [r11+0x5]"),
-            (b"\x41\x8b\x8a\x05\x00\x00\x00",     "mov    ecx,DWORD PTR [r10+0x5]"),
-            (b"\x41\x8b\x89\x05\x00\x00\x00",     "mov    ecx,DWORD PTR [r9+0x5]"),
-            (b"\x41\x8b\x88\x05\x00\x00\x00",     "mov    ecx,DWORD PTR [r8+0x5]"),
-            (b"\x8b\x8f\x05\x00\x00\x00",         "mov    ecx,DWORD PTR [rdi+0x5]"),
-            (b"\x8b\x8e\x05\x00\x00\x00",         "mov    ecx,DWORD PTR [rsi+0x5]"),
-            (b"\x8b\x8d\x05\x00\x00\x00",         "mov    ecx,DWORD PTR [rbp+0x5]"),
-            (b"\x8b\x8c\x24\x05\x00\x00\x00",     "mov    ecx,DWORD PTR [rsp+0x5]"),
-            (b"\x8b\x8b\x05\x00\x00\x00",         "mov    ecx,DWORD PTR [rbx+0x5]"),
-            (b"\x8b\x8a\x05\x00\x00\x00",         "mov    ecx,DWORD PTR [rdx+0x5]"),
-            (b"\x8b\x89\x05\x00\x00\x00",         "mov    ecx,DWORD PTR [rcx+0x5]"),
-            (b"\x8b\x88\x05\x00\x00\x00",         "mov    ecx,DWORD PTR [rax+0x5]"),
+            (b"\x41\x8b\x4f\x05",     "mov    ecx,DWORD PTR [r15+0x5]"),
+            (b"\x41\x8b\x4e\x05",     "mov    ecx,DWORD PTR [r14+0x5]"),
+            (b"\x41\x8b\x4d\x05",     "mov    ecx,DWORD PTR [r13+0x5]"),
+            (b"\x41\x8b\x4c\x24\x05", "mov    ecx,DWORD PTR [r12+0x5]"),
+            (b"\x41\x8b\x4b\x05",     "mov    ecx,DWORD PTR [r11+0x5]"),
+            (b"\x41\x8b\x4a\x05",     "mov    ecx,DWORD PTR [r10+0x5]"),
+            (b"\x41\x8b\x49\x05",     "mov    ecx,DWORD PTR [r9+0x5]"),
+            (b"\x41\x8b\x48\x05",     "mov    ecx,DWORD PTR [r8+0x5]"),
+            (b"\x8b\x4f\x05",         "mov    ecx,DWORD PTR [rdi+0x5]"),
+            (b"\x8b\x4e\x05",         "mov    ecx,DWORD PTR [rsi+0x5]"),
+            (b"\x8b\x4d\x05",         "mov    ecx,DWORD PTR [rbp+0x5]"),
+            (b"\x8b\x4c\x24\x05",     "mov    ecx,DWORD PTR [rsp+0x5]"),
+            (b"\x8b\x4b\x05",         "mov    ecx,DWORD PTR [rbx+0x5]"),
+            (b"\x8b\x4a\x05",         "mov    ecx,DWORD PTR [rdx+0x5]"),
+            (b"\x8b\x49\x05",         "mov    ecx,DWORD PTR [rcx+0x5]"),
+            (b"\x8b\x48\x05",         "mov    ecx,DWORD PTR [rax+0x5]"),
         ]);
+    }
+
+    #[test]
+    fn base_only_disp32() {
         let mut code = Vec::<u8>::new();
         for base in Reg::all() {
             gen::mov32_r_rm(&mut code, Reg::Cx, Mem2::base(base).disp(0x333));
