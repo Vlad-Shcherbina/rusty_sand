@@ -50,11 +50,20 @@ fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: impl Into<RegOrMem2>) -> 
                 8 => 3,
                 _ => panic!("{}", scale),
             };
-            sink.prepend(&disp.to_le_bytes());
             let sib = scale << 6
                     | (index & 7) << 3
                     | base & 7;
-            sink.prepend(&[0b10_000_100 | r1_modrm, sib]);
+            match i8::try_from(disp) {
+                Ok(0) if base & 7 != 5 =>
+                    sink.prepend(&[0b00_000_100 | r1_modrm, sib]),
+                Ok(disp) => {
+                    sink.prepend(&[0b01_000_100 | r1_modrm, sib, disp as u8]);
+                }
+                Err(_) => {
+                    sink.prepend(&disp.to_le_bytes());
+                    sink.prepend(&[0b10_000_100 | r1_modrm, sib]);
+                }
+            }
             r1_rex | base >> 3 | index >> 3 << 1
         }
     }
@@ -672,10 +681,10 @@ mod tests {
             gen::mov32_r_rm(&mut code, Reg::Cx, Mem2::base(Reg::Bx).index_scale(Reg::Ax, scale));
         }
         expect_disasm(&code, &[
-            (b"\x8b\x8c\xc3\x00\x00\x00\x00", "mov    ecx,DWORD PTR [rbx+rax*8+0x0]"),
-            (b"\x8b\x8c\x83\x00\x00\x00\x00", "mov    ecx,DWORD PTR [rbx+rax*4+0x0]"),
-            (b"\x8b\x8c\x43\x00\x00\x00\x00", "mov    ecx,DWORD PTR [rbx+rax*2+0x0]"),
-            (b"\x8b\x8c\x03\x00\x00\x00\x00", "mov    ecx,DWORD PTR [rbx+rax*1+0x0]"),
+            (b"\x8b\x0c\xc3", "mov    ecx,DWORD PTR [rbx+rax*8]"),
+            (b"\x8b\x0c\x83", "mov    ecx,DWORD PTR [rbx+rax*4]"),
+            (b"\x8b\x0c\x43", "mov    ecx,DWORD PTR [rbx+rax*2]"),
+            (b"\x8b\x0c\x03", "mov    ecx,DWORD PTR [rbx+rax*1]"),
         ]);
     }
 
@@ -689,45 +698,45 @@ mod tests {
             for &index in &indexes {
                 gen::mov32_r_rm(&mut code, Reg::Bx, Mem2::base(base).index_scale(index, 2));
                 expected_texts.push(
-                    format!("mov    ebx,DWORD PTR [{}+{}*2+0x0]", base.name64(), index.name64()));
+                    format!("mov    ebx,DWORD PTR [{}+{}*2]", base.name64(), index.name64()));
             }
         }
         let expected: &[(&[u8], &str)] = &[
-            (b"\x43\x8b\x9c\x7f\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r15+r15*2+0x0]"),
-            (b"\x43\x8b\x9c\x6f\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r15+r13*2+0x0]"),
-            (b"\x43\x8b\x9c\x67\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r15+r12*2+0x0]"),
-            (b"\x41\x8b\x9c\x6f\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r15+rbp*2+0x0]"),
-            (b"\x41\x8b\x9c\x47\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r15+rax*2+0x0]"),
-            (b"\x43\x8b\x9c\x7d\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r13+r15*2+0x0]"),
-            (b"\x43\x8b\x9c\x6d\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r13+r13*2+0x0]"),
-            (b"\x43\x8b\x9c\x65\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r13+r12*2+0x0]"),
-            (b"\x41\x8b\x9c\x6d\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r13+rbp*2+0x0]"),
-            (b"\x41\x8b\x9c\x45\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r13+rax*2+0x0]"),
-            (b"\x43\x8b\x9c\x7c\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r12+r15*2+0x0]"),
-            (b"\x43\x8b\x9c\x6c\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r12+r13*2+0x0]"),
-            (b"\x43\x8b\x9c\x64\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r12+r12*2+0x0]"),
-            (b"\x41\x8b\x9c\x6c\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r12+rbp*2+0x0]"),
-            (b"\x41\x8b\x9c\x44\x00\x00\x00\x00", "mov    ebx,DWORD PTR [r12+rax*2+0x0]"),
-            (b"\x42\x8b\x9c\x7d\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rbp+r15*2+0x0]"),
-            (b"\x42\x8b\x9c\x6d\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rbp+r13*2+0x0]"),
-            (b"\x42\x8b\x9c\x65\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rbp+r12*2+0x0]"),
-            (b"\x8b\x9c\x6d\x00\x00\x00\x00",     "mov    ebx,DWORD PTR [rbp+rbp*2+0x0]"),
-            (b"\x8b\x9c\x45\x00\x00\x00\x00",     "mov    ebx,DWORD PTR [rbp+rax*2+0x0]"),
-            (b"\x42\x8b\x9c\x7c\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rsp+r15*2+0x0]"),
-            (b"\x42\x8b\x9c\x6c\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rsp+r13*2+0x0]"),
-            (b"\x42\x8b\x9c\x64\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rsp+r12*2+0x0]"),
-            (b"\x8b\x9c\x6c\x00\x00\x00\x00",     "mov    ebx,DWORD PTR [rsp+rbp*2+0x0]"),
-            (b"\x8b\x9c\x44\x00\x00\x00\x00",     "mov    ebx,DWORD PTR [rsp+rax*2+0x0]"),
-            (b"\x42\x8b\x9c\x78\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rax+r15*2+0x0]"),
-            (b"\x42\x8b\x9c\x68\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rax+r13*2+0x0]"),
-            (b"\x42\x8b\x9c\x60\x00\x00\x00\x00", "mov    ebx,DWORD PTR [rax+r12*2+0x0]"),
-            (b"\x8b\x9c\x68\x00\x00\x00\x00",     "mov    ebx,DWORD PTR [rax+rbp*2+0x0]"),
-            (b"\x8b\x9c\x40\x00\x00\x00\x00",     "mov    ebx,DWORD PTR [rax+rax*2+0x0]"),
+            (b"\x43\x8b\x1c\x7f",     "mov    ebx,DWORD PTR [r15+r15*2]"),
+            (b"\x43\x8b\x1c\x6f",     "mov    ebx,DWORD PTR [r15+r13*2]"),
+            (b"\x43\x8b\x1c\x67",     "mov    ebx,DWORD PTR [r15+r12*2]"),
+            (b"\x41\x8b\x1c\x6f",     "mov    ebx,DWORD PTR [r15+rbp*2]"),
+            (b"\x41\x8b\x1c\x47",     "mov    ebx,DWORD PTR [r15+rax*2]"),
+            (b"\x43\x8b\x5c\x7d\x00", "mov    ebx,DWORD PTR [r13+r15*2+0x0]"),
+            (b"\x43\x8b\x5c\x6d\x00", "mov    ebx,DWORD PTR [r13+r13*2+0x0]"),
+            (b"\x43\x8b\x5c\x65\x00", "mov    ebx,DWORD PTR [r13+r12*2+0x0]"),
+            (b"\x41\x8b\x5c\x6d\x00", "mov    ebx,DWORD PTR [r13+rbp*2+0x0]"),
+            (b"\x41\x8b\x5c\x45\x00", "mov    ebx,DWORD PTR [r13+rax*2+0x0]"),
+            (b"\x43\x8b\x1c\x7c",     "mov    ebx,DWORD PTR [r12+r15*2]"),
+            (b"\x43\x8b\x1c\x6c",     "mov    ebx,DWORD PTR [r12+r13*2]"),
+            (b"\x43\x8b\x1c\x64",     "mov    ebx,DWORD PTR [r12+r12*2]"),
+            (b"\x41\x8b\x1c\x6c",     "mov    ebx,DWORD PTR [r12+rbp*2]"),
+            (b"\x41\x8b\x1c\x44",     "mov    ebx,DWORD PTR [r12+rax*2]"),
+            (b"\x42\x8b\x5c\x7d\x00", "mov    ebx,DWORD PTR [rbp+r15*2+0x0]"),
+            (b"\x42\x8b\x5c\x6d\x00", "mov    ebx,DWORD PTR [rbp+r13*2+0x0]"),
+            (b"\x42\x8b\x5c\x65\x00", "mov    ebx,DWORD PTR [rbp+r12*2+0x0]"),
+            (b"\x8b\x5c\x6d\x00",     "mov    ebx,DWORD PTR [rbp+rbp*2+0x0]"),
+            (b"\x8b\x5c\x45\x00",     "mov    ebx,DWORD PTR [rbp+rax*2+0x0]"),
+            (b"\x42\x8b\x1c\x7c",     "mov    ebx,DWORD PTR [rsp+r15*2]"),
+            (b"\x42\x8b\x1c\x6c",     "mov    ebx,DWORD PTR [rsp+r13*2]"),
+            (b"\x42\x8b\x1c\x64",     "mov    ebx,DWORD PTR [rsp+r12*2]"),
+            (b"\x8b\x1c\x6c",         "mov    ebx,DWORD PTR [rsp+rbp*2]"),
+            (b"\x8b\x1c\x44",         "mov    ebx,DWORD PTR [rsp+rax*2]"),
+            (b"\x42\x8b\x1c\x78",     "mov    ebx,DWORD PTR [rax+r15*2]"),
+            (b"\x42\x8b\x1c\x68",     "mov    ebx,DWORD PTR [rax+r13*2]"),
+            (b"\x42\x8b\x1c\x60",     "mov    ebx,DWORD PTR [rax+r12*2]"),
+            (b"\x8b\x1c\x68",         "mov    ebx,DWORD PTR [rax+rbp*2]"),
+            (b"\x8b\x1c\x40",         "mov    ebx,DWORD PTR [rax+rax*2]"),
         ];
         expect_disasm(&code, expected);
         assert_eq!(expected_texts.len(), expected.len());
         for (et, &(_, t)) in expected_texts.iter().rev().zip(expected) {
-            assert_eq!(et, t);
+            assert_eq!(et, &t.replace("+0x0]", "]"));
         }
     }
 
@@ -745,36 +754,36 @@ mod tests {
             }
         }
         let expected: &[(&[u8], &str)] = &[
-            (b"\x43\x8b\x9c\x7f\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+r15*2-0x5]"),
-            (b"\x43\x8b\x9c\x6f\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+r13*2-0x5]"),
-            (b"\x43\x8b\x9c\x67\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+r12*2-0x5]"),
-            (b"\x41\x8b\x9c\x6f\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+rbp*2-0x5]"),
-            (b"\x41\x8b\x9c\x47\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r15+rax*2-0x5]"),
-            (b"\x43\x8b\x9c\x7d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+r15*2-0x5]"),
-            (b"\x43\x8b\x9c\x6d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+r13*2-0x5]"),
-            (b"\x43\x8b\x9c\x65\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+r12*2-0x5]"),
-            (b"\x41\x8b\x9c\x6d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+rbp*2-0x5]"),
-            (b"\x41\x8b\x9c\x45\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r13+rax*2-0x5]"),
-            (b"\x43\x8b\x9c\x7c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+r15*2-0x5]"),
-            (b"\x43\x8b\x9c\x6c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+r13*2-0x5]"),
-            (b"\x43\x8b\x9c\x64\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+r12*2-0x5]"),
-            (b"\x41\x8b\x9c\x6c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+rbp*2-0x5]"),
-            (b"\x41\x8b\x9c\x44\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [r12+rax*2-0x5]"),
-            (b"\x42\x8b\x9c\x7d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rbp+r15*2-0x5]"),
-            (b"\x42\x8b\x9c\x6d\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rbp+r13*2-0x5]"),
-            (b"\x42\x8b\x9c\x65\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rbp+r12*2-0x5]"),
-            (b"\x8b\x9c\x6d\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rbp+rbp*2-0x5]"),
-            (b"\x8b\x9c\x45\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rbp+rax*2-0x5]"),
-            (b"\x42\x8b\x9c\x7c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rsp+r15*2-0x5]"),
-            (b"\x42\x8b\x9c\x6c\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rsp+r13*2-0x5]"),
-            (b"\x42\x8b\x9c\x64\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rsp+r12*2-0x5]"),
-            (b"\x8b\x9c\x6c\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rsp+rbp*2-0x5]"),
-            (b"\x8b\x9c\x44\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rsp+rax*2-0x5]"),
-            (b"\x42\x8b\x9c\x78\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rax+r15*2-0x5]"),
-            (b"\x42\x8b\x9c\x68\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rax+r13*2-0x5]"),
-            (b"\x42\x8b\x9c\x60\xfb\xff\xff\xff", "mov    ebx,DWORD PTR [rax+r12*2-0x5]"),
-            (b"\x8b\x9c\x68\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rax+rbp*2-0x5]"),
-            (b"\x8b\x9c\x40\xfb\xff\xff\xff",     "mov    ebx,DWORD PTR [rax+rax*2-0x5]"),
+            (b"\x43\x8b\x5c\x7f\xfb", "mov    ebx,DWORD PTR [r15+r15*2-0x5]"),
+            (b"\x43\x8b\x5c\x6f\xfb", "mov    ebx,DWORD PTR [r15+r13*2-0x5]"),
+            (b"\x43\x8b\x5c\x67\xfb", "mov    ebx,DWORD PTR [r15+r12*2-0x5]"),
+            (b"\x41\x8b\x5c\x6f\xfb", "mov    ebx,DWORD PTR [r15+rbp*2-0x5]"),
+            (b"\x41\x8b\x5c\x47\xfb", "mov    ebx,DWORD PTR [r15+rax*2-0x5]"),
+            (b"\x43\x8b\x5c\x7d\xfb", "mov    ebx,DWORD PTR [r13+r15*2-0x5]"),
+            (b"\x43\x8b\x5c\x6d\xfb", "mov    ebx,DWORD PTR [r13+r13*2-0x5]"),
+            (b"\x43\x8b\x5c\x65\xfb", "mov    ebx,DWORD PTR [r13+r12*2-0x5]"),
+            (b"\x41\x8b\x5c\x6d\xfb", "mov    ebx,DWORD PTR [r13+rbp*2-0x5]"),
+            (b"\x41\x8b\x5c\x45\xfb", "mov    ebx,DWORD PTR [r13+rax*2-0x5]"),
+            (b"\x43\x8b\x5c\x7c\xfb", "mov    ebx,DWORD PTR [r12+r15*2-0x5]"),
+            (b"\x43\x8b\x5c\x6c\xfb", "mov    ebx,DWORD PTR [r12+r13*2-0x5]"),
+            (b"\x43\x8b\x5c\x64\xfb", "mov    ebx,DWORD PTR [r12+r12*2-0x5]"),
+            (b"\x41\x8b\x5c\x6c\xfb", "mov    ebx,DWORD PTR [r12+rbp*2-0x5]"),
+            (b"\x41\x8b\x5c\x44\xfb", "mov    ebx,DWORD PTR [r12+rax*2-0x5]"),
+            (b"\x42\x8b\x5c\x7d\xfb", "mov    ebx,DWORD PTR [rbp+r15*2-0x5]"),
+            (b"\x42\x8b\x5c\x6d\xfb", "mov    ebx,DWORD PTR [rbp+r13*2-0x5]"),
+            (b"\x42\x8b\x5c\x65\xfb", "mov    ebx,DWORD PTR [rbp+r12*2-0x5]"),
+            (b"\x8b\x5c\x6d\xfb",     "mov    ebx,DWORD PTR [rbp+rbp*2-0x5]"),
+            (b"\x8b\x5c\x45\xfb",     "mov    ebx,DWORD PTR [rbp+rax*2-0x5]"),
+            (b"\x42\x8b\x5c\x7c\xfb", "mov    ebx,DWORD PTR [rsp+r15*2-0x5]"),
+            (b"\x42\x8b\x5c\x6c\xfb", "mov    ebx,DWORD PTR [rsp+r13*2-0x5]"),
+            (b"\x42\x8b\x5c\x64\xfb", "mov    ebx,DWORD PTR [rsp+r12*2-0x5]"),
+            (b"\x8b\x5c\x6c\xfb",     "mov    ebx,DWORD PTR [rsp+rbp*2-0x5]"),
+            (b"\x8b\x5c\x44\xfb",     "mov    ebx,DWORD PTR [rsp+rax*2-0x5]"),
+            (b"\x42\x8b\x5c\x78\xfb", "mov    ebx,DWORD PTR [rax+r15*2-0x5]"),
+            (b"\x42\x8b\x5c\x68\xfb", "mov    ebx,DWORD PTR [rax+r13*2-0x5]"),
+            (b"\x42\x8b\x5c\x60\xfb", "mov    ebx,DWORD PTR [rax+r12*2-0x5]"),
+            (b"\x8b\x5c\x68\xfb",     "mov    ebx,DWORD PTR [rax+rbp*2-0x5]"),
+            (b"\x8b\x5c\x40\xfb",     "mov    ebx,DWORD PTR [rax+rax*2-0x5]"),
         ];
         expect_disasm(&code, expected);
         assert_eq!(expected_texts.len(), expected.len());

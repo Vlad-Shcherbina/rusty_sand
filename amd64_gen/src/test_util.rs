@@ -40,13 +40,13 @@ pub fn expect_disasm(code: &[u8], expected_disasm: &[(&[u8], &str)]) {
         match (it.next(), it_e.next()) {
             (Some((bytes, text)), Some((bytes2, text2))) =>
                 if bytes != bytes2 || text != text2 {
-                    println!("     got: {}   {}", byte_literal(bytes), text);
-                    println!("expected: {}   {}", byte_literal(bytes2), text2);
+                    println!("     got: {:30}   {}", byte_literal(bytes), text);
+                    println!("expected: {:30}   {}", byte_literal(bytes2), text2);
                     println!();
                     eq = false;
                 }
             (Some((bytes, text)), None) => {
-                println!("     got: {}   {}", byte_literal(bytes), text);
+                println!("     got: {:30}   {}", byte_literal(bytes), text);
                 println!("expected: nothing");
                 println!();
                 eq = false;
@@ -54,7 +54,7 @@ pub fn expect_disasm(code: &[u8], expected_disasm: &[(&[u8], &str)]) {
             }
             (None, Some((bytes2, text2))) => {
                 println!("     got: nothing");
-                println!("expected: {}   {}", byte_literal(bytes2), text2);
+                println!("expected: {:30}   {}", byte_literal(bytes2), text2);
                 println!();
                 eq = false;
                 break;
