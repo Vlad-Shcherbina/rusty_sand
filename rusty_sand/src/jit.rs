@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::convert::TryFrom;
 use exe_buf::ExeBuf;
-use amd64_gen::{CodeSink, gen, Reg, Binop, Mem2, Cond, MulOp};
+use amd64_gen::{CodeSink, gen, Reg, Binop, Mem, Cond, MulOp};
 use crate::interp::opcodes;
 
 #[derive(Default)]
@@ -203,11 +203,11 @@ impl State {
                 // mov rax, [self.arrays.ptr + 8 * rax + VEC_PTR_OFFSET]
                 // mov a, [rax + 4 * c]
                 assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
-                gen::mov32_r_rm(buf, a, Mem2::base(Reg::Ax).index_scale(c, 4));
+                gen::mov32_r_rm(buf, a, Mem::base(Reg::Ax).index_scale(c, 4));
                 gen::mov64_r_rm(buf, Reg::Ax,
-                    Mem2::base(Reg::Di).index_scale(Reg::Ax, 8)
+                    Mem::base(Reg::Di).index_scale(Reg::Ax, 8)
                     .disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
-                gen::lea64(buf, Reg::Ax, Mem2::base(b).index_scale(b, 2));
+                gen::lea64(buf, Reg::Ax, Mem::base(b).index_scale(b, 2));
             }
             opcodes::ARRAY_AMENDMENT => {
                 // TODO: bounds check
@@ -215,7 +215,7 @@ impl State {
                 let skip = buf.cur_pos();
 
                 // jump to the next instruction
-                gen::jmp_indirect(buf, Mem2::base(Reg::Si).index_scale(Reg::Ax, 8));
+                gen::jmp_indirect(buf, Mem::base(Reg::Si).index_scale(Reg::Ax, 8));
                 gen::mov32_imm(buf, Reg::Ax, i32::try_from(pos + 1).unwrap());
 
                 // call self.uncompile(b)
@@ -226,7 +226,7 @@ impl State {
                 gen::jmp_cond(buf, Cond::E,
                     i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap());
                 gen::binop64_rm_r(buf, Binop::Cmp,
-                    Mem2::base(Reg::Si).index_scale(b, 8),
+                    Mem::base(Reg::Si).index_scale(b, 8),
                     Reg::Bp,
                 );
 
@@ -241,10 +241,10 @@ impl State {
                 // mov rax, [self.arrays.ptr + 8 * rax + VEC_PTR_OFFSET]
                 // mov [rax + 4 * b], c
                 assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
-                gen::mov32_rm_r(buf, Mem2::base(Reg::Ax).index_scale(b, 4), c);
+                gen::mov32_rm_r(buf, Mem::base(Reg::Ax).index_scale(b, 4), c);
                 gen::mov64_r_rm(buf, Reg::Ax,
-                    Mem2::base(Reg::Di).index_scale(Reg::Ax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
-                gen::lea64(buf, Reg::Ax, Mem2::base(a).index_scale(a, 2));
+                    Mem::base(Reg::Di).index_scale(Reg::Ax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
+                gen::lea64(buf, Reg::Ax, Mem::base(a).index_scale(a, 2));
             }
             opcodes::ADDITION => {
                 gen::mov32_r_rm(buf, a, Reg::Ax);
@@ -275,13 +275,13 @@ impl State {
 
                 // self.finger <- pos + 1
                 gen::mov32_imm(buf,
-                    Mem2::base(Reg::Bx).disp(i32::try_from(memoffset::offset_of!(State, finger)).unwrap()),
+                    Mem::base(Reg::Bx).disp(i32::try_from(memoffset::offset_of!(State, finger)).unwrap()),
                     i32::try_from(pos + 1).unwrap());
             }
             opcodes::ALLOCATION => {
                 // update rdi in case self.arrays was reallocated
                 gen::mov64_r_rm(buf, Reg::Di,
-                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                    Mem::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()));
 
                 // b <- call self.allocation(c)
@@ -361,7 +361,7 @@ impl State {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
 
-                gen::jmp_indirect(buf, Mem2::base(Reg::Si).index_scale(c, 8));
+                gen::jmp_indirect(buf, Mem::base(Reg::Si).index_scale(c, 8));
                 gen::mov64_r_rm(buf, Reg::Ax, c);
 
                 let no_fail = buf.cur_pos();
@@ -369,14 +369,14 @@ impl State {
                 gen::jmp_cond(buf, Cond::B,
                     i32::try_from(no_fail as usize - buf.cur_pos() as usize).unwrap());
                 gen::binop64_r_rm(buf, Binop::Cmp, c,
-                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                    Mem::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, jump_locations) + VEC_LEN_OFFSET).unwrap()));
 
                 let no_switch_code = buf.cur_pos();
 
                 // rsi <- jump_locations
                 gen::mov64_r_rm(buf, Reg::Si,
-                    Mem2::base(Reg::Bx).disp(i32::try_from(
+                    Mem::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, jump_locations) + VEC_PTR_OFFSET).unwrap()));
 
                 gen::pop64(buf, Reg::Ax);

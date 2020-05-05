@@ -86,31 +86,31 @@ impl Reg {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Mem2 {
+pub struct Mem {
     base: Reg,
     index_scale: Option<(Reg, u8)>,
     disp: i32,
 }
 
-impl Mem2 {
-    pub fn base(base: Reg) -> Mem2 {
-        Mem2 {
+impl Mem {
+    pub fn base(base: Reg) -> Mem {
+        Mem {
             base,
             index_scale: None,
             disp: 0,
         }
     }
 
-    pub fn index_scale(self, index: Reg, scale: u8) -> Mem2 {
+    pub fn index_scale(self, index: Reg, scale: u8) -> Mem {
         assert!(index != Reg::Sp);
-        Mem2 {
+        Mem {
             index_scale: Some((index, scale)),
             ..self
         }
     }
 
-    pub fn disp(self, disp: i32) -> Mem2 {
-        Mem2 {
+    pub fn disp(self, disp: i32) -> Mem {
+        Mem {
             disp,
             ..self
         }
@@ -118,19 +118,19 @@ impl Mem2 {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum RegOrMem2 {
+pub enum RegOrMem {
     Reg(Reg),
     RipRel(i32),
-    Mem(Mem2),
+    Mem(Mem),
 }
-pub use RegOrMem2::RipRel;
+pub use RegOrMem::RipRel;
 
-impl From<Reg> for RegOrMem2 {
+impl From<Reg> for RegOrMem {
     fn from(r: Reg) -> Self { Self::Reg(r) }
 }
 
-impl From<Mem2> for RegOrMem2 {
-    fn from(m: Mem2) -> Self { Self::Mem(m) }
+impl From<Mem> for RegOrMem {
+    fn from(m: Mem) -> Self { Self::Mem(m) }
 }
 
 #[derive(Clone, Copy, Debug)]
