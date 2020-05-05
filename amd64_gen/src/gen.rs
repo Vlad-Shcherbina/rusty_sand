@@ -70,183 +70,187 @@ fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: impl Into<RegOrMem>) -> u
     }
 }
 
-pub fn mov32_r_rm(sink: &mut impl CodeSink, r: Reg, rm: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, r, rm);
-    sink.prepend(&[0x8B]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
-    }
-}
+impl<T: CodeSink> GenExt for T {}
 
-pub fn mov64_r_rm(sink: &mut impl CodeSink, r: Reg, rm: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, r, rm);
-    sink.prepend(&[rex | 0x48, 0x8B]);
-}
-
-pub fn mov32_rm_r(sink: &mut impl CodeSink, rm: impl Into<RegOrMem>, r: Reg) {
-    let rex = encode_modrm(sink, r, rm);
-    sink.prepend(&[0x89]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
-    }
-}
-
-pub fn mov64_rm_r(sink: &mut impl CodeSink, rm: impl Into<RegOrMem>, r: Reg) {
-    let rex = encode_modrm(sink, r, rm);
-    sink.prepend(&[rex | 0x48, 0x89]);
-}
-
-pub fn mov32_imm(sink: &mut impl CodeSink, rm: impl Into<RegOrMem>, imm: i32) {
-    sink.prepend(&imm.to_le_bytes());
-    let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
-    sink.prepend(&[0xc7]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
-    }
-}
-
-pub fn mov64_imm(sink: &mut impl CodeSink, rm: impl Into<RegOrMem>, imm: i32) {
-    sink.prepend(&imm.to_le_bytes());
-    let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
-    sink.prepend(&[rex | 0x48, 0xc7]);
-}
-
-pub fn movabs64_imm(sink: &mut impl CodeSink, r: Reg, imm: i64) {
-    let r = r as u8;
-    sink.prepend(&imm.to_le_bytes());
-    sink.prepend(&[0x48 | r >> 3, 0xb8 | r & 7]);
-}
-
-pub fn lea64(sink: &mut impl CodeSink, r: Reg, m: impl Into<RegOrMem> + Copy) {
-    if let RegOrMem::Reg(_) = m.into() {
-        panic!("lea with register");
-    }
-    let rex = encode_modrm(sink, r, m);
-    sink.prepend(&[rex | 0x48, 0x8d]);
-}
-
-pub fn binop32_r_rm(sink: &mut impl CodeSink, op: Binop, r: Reg, rm: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, r, rm);
-    sink.prepend(&[op as u8 * 8 + 3]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
-    }
-}
-
-pub fn binop64_r_rm(sink: &mut impl CodeSink, op: Binop, r: Reg, rm: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, r, rm);
-    sink.prepend(&[rex | 0x48, op as u8 * 8 + 3]);
-}
-
-pub fn binop32_rm_r(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem>, r: Reg) {
-    let rex = encode_modrm(sink, r, rm);
-    sink.prepend(&[op as u8 * 8 + 1]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
-    }
-}
-
-pub fn binop64_rm_r(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem>, r: Reg) {
-    let rex = encode_modrm(sink, r, rm);
-    sink.prepend(&[rex | 0x48, op as u8 * 8 + 1]);
-}
-
-pub fn binop32_imm(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem>, imm: i32) {
-    sink.prepend(&imm.to_le_bytes());
-    let rex = encode_modrm(sink, (op as u8).try_into().unwrap(), rm);
-    sink.prepend(&[0x81]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
-    }
-}
-
-pub fn binop64_imm(sink: &mut impl CodeSink, op: Binop, rm: impl Into<RegOrMem>, imm: i32) {
-    sink.prepend(&imm.to_le_bytes());
-    let rex = encode_modrm(sink, (op as u8).try_into().unwrap(), rm);
-    sink.prepend(&[rex | 0x48, 0x81]);
-}
-
-pub fn mul_op32(sink: &mut impl CodeSink, op: MulOp, rm: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, (op as u8).try_into().unwrap(), rm);
-    sink.prepend(&[0xf7]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
-    }
-}
-
-pub fn mul_op64(sink: &mut impl CodeSink, op: MulOp, rm: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, (op as u8).try_into().unwrap(), rm);
-    sink.prepend(&[rex | 0x48, 0xf7]);
-}
-
-pub fn push64(sink: &mut impl CodeSink, rm: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, 6.try_into().unwrap(), rm);
-    sink.prepend(&[0xff]);
-    if rex != 0 {
-        // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
-        // no need to set it
-        sink.prepend(&[rex | 0x40]);
-    }
-}
-
-pub fn pop64(sink: &mut impl CodeSink, rm: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, 0.try_into().unwrap(), rm);
-    sink.prepend(&[0x8f]);
-    if rex != 0 {
-        // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
-        // no need to set it
-        sink.prepend(&[rex | 0x40]);
-    }
-}
-
-pub fn jmp_cond(sink: &mut impl CodeSink, cond: Cond, rel: impl Into<RelJumpTarget>) {
-    let cond = cond as u8;
-    match rel.into() {
-        RelJumpTarget::Rel8(rel) => {
-            sink.prepend(&[0x70 | cond, rel as u8]);
-        }
-        RelJumpTarget::Rel32(rel) => {
-            sink.prepend(&rel.to_le_bytes());
-            sink.prepend(&[0x0f, 0x80 | cond]);
+pub trait GenExt: CodeSink + Sized {
+    fn mov32_r_rm(&mut self, r: Reg, rm: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, r, rm);
+        self.prepend(&[0x8B]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
         }
     }
-}
 
-pub fn jmp_rel(sink: &mut impl CodeSink, rel: impl Into<RelJumpTarget>) {
-    match rel.into() {
-        RelJumpTarget::Rel8(rel) => {
-            sink.prepend(&[0xeb, rel as u8]);
+    fn mov64_r_rm(&mut self, r: Reg, rm: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, r, rm);
+        self.prepend(&[rex | 0x48, 0x8B]);
+    }
+
+    fn mov32_rm_r(&mut self, rm: impl Into<RegOrMem>, r: Reg) {
+        let rex = encode_modrm(self, r, rm);
+        self.prepend(&[0x89]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
         }
-        RelJumpTarget::Rel32(rel) => {
-            sink.prepend(&rel.to_le_bytes());
-            sink.prepend(&[0xe9]);
+    }
+
+    fn mov64_rm_r(&mut self, rm: impl Into<RegOrMem>, r: Reg) {
+        let rex = encode_modrm(self, r, rm);
+        self.prepend(&[rex | 0x48, 0x89]);
+    }
+
+    fn mov32_imm(&mut self, rm: impl Into<RegOrMem>, imm: i32) {
+        self.prepend(&imm.to_le_bytes());
+        let rex = encode_modrm(self, 0.try_into().unwrap(), rm);
+        self.prepend(&[0xc7]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
         }
     }
-}
 
-pub fn call_rel(sink: &mut impl CodeSink, rel: i32) {
-    sink.prepend(&rel.to_le_bytes());
-    sink.prepend(&[0xe8]);
-}
-
-pub fn jmp_indirect(sink: &mut impl CodeSink, target: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, 4.try_into().unwrap(), target);
-    sink.prepend(&[0xff]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
+    fn mov64_imm(&mut self, rm: impl Into<RegOrMem>, imm: i32) {
+        self.prepend(&imm.to_le_bytes());
+        let rex = encode_modrm(self, 0.try_into().unwrap(), rm);
+        self.prepend(&[rex | 0x48, 0xc7]);
     }
-}
 
-pub fn call_indirect(sink: &mut impl CodeSink, target: impl Into<RegOrMem>) {
-    let rex = encode_modrm(sink, 2.try_into().unwrap(), target);
-    sink.prepend(&[0xff]);
-    if rex != 0 {
-        sink.prepend(&[rex | 0x40]);
+    fn movabs64_imm(&mut self, r: Reg, imm: i64) {
+        let r = r as u8;
+        self.prepend(&imm.to_le_bytes());
+        self.prepend(&[0x48 | r >> 3, 0xb8 | r & 7]);
     }
-}
 
-pub fn ret(sink: &mut impl CodeSink) {
-    sink.prepend(&[0xc3]);
+    fn lea64(&mut self, r: Reg, m: impl Into<RegOrMem> + Copy) {
+        if let RegOrMem::Reg(_) = m.into() {
+            panic!("lea with register");
+        }
+        let rex = encode_modrm(self, r, m);
+        self.prepend(&[rex | 0x48, 0x8d]);
+    }
+
+    fn binop32_r_rm(&mut self, op: Binop, r: Reg, rm: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, r, rm);
+        self.prepend(&[op as u8 * 8 + 3]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
+        }
+    }
+
+    fn binop64_r_rm(&mut self, op: Binop, r: Reg, rm: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, r, rm);
+        self.prepend(&[rex | 0x48, op as u8 * 8 + 3]);
+    }
+
+    fn binop32_rm_r(&mut self, op: Binop, rm: impl Into<RegOrMem>, r: Reg) {
+        let rex = encode_modrm(self, r, rm);
+        self.prepend(&[op as u8 * 8 + 1]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
+        }
+    }
+
+    fn binop64_rm_r(&mut self, op: Binop, rm: impl Into<RegOrMem>, r: Reg) {
+        let rex = encode_modrm(self, r, rm);
+        self.prepend(&[rex | 0x48, op as u8 * 8 + 1]);
+    }
+
+    fn binop32_imm(&mut self, op: Binop, rm: impl Into<RegOrMem>, imm: i32) {
+        self.prepend(&imm.to_le_bytes());
+        let rex = encode_modrm(self, (op as u8).try_into().unwrap(), rm);
+        self.prepend(&[0x81]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
+        }
+    }
+
+    fn binop64_imm(&mut self, op: Binop, rm: impl Into<RegOrMem>, imm: i32) {
+        self.prepend(&imm.to_le_bytes());
+        let rex = encode_modrm(self, (op as u8).try_into().unwrap(), rm);
+        self.prepend(&[rex | 0x48, 0x81]);
+    }
+
+    fn mul_op32(&mut self, op: MulOp, rm: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, (op as u8).try_into().unwrap(), rm);
+        self.prepend(&[0xf7]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
+        }
+    }
+
+    fn mul_op64(&mut self, op: MulOp, rm: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, (op as u8).try_into().unwrap(), rm);
+        self.prepend(&[rex | 0x48, 0xf7]);
+    }
+
+    fn push64(&mut self, rm: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, 6.try_into().unwrap(), rm);
+        self.prepend(&[0xff]);
+        if rex != 0 {
+            // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
+            // no need to set it
+            self.prepend(&[rex | 0x40]);
+        }
+    }
+
+    fn pop64(&mut self, rm: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, 0.try_into().unwrap(), rm);
+        self.prepend(&[0x8f]);
+        if rex != 0 {
+            // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
+            // no need to set it
+            self.prepend(&[rex | 0x40]);
+        }
+    }
+
+    fn jmp_cond(&mut self, cond: Cond, rel: impl Into<RelJumpTarget>) {
+        let cond = cond as u8;
+        match rel.into() {
+            RelJumpTarget::Rel8(rel) => {
+                self.prepend(&[0x70 | cond, rel as u8]);
+            }
+            RelJumpTarget::Rel32(rel) => {
+                self.prepend(&rel.to_le_bytes());
+                self.prepend(&[0x0f, 0x80 | cond]);
+            }
+        }
+    }
+
+    fn jmp_rel(&mut self, rel: impl Into<RelJumpTarget>) {
+        match rel.into() {
+            RelJumpTarget::Rel8(rel) => {
+                self.prepend(&[0xeb, rel as u8]);
+            }
+            RelJumpTarget::Rel32(rel) => {
+                self.prepend(&rel.to_le_bytes());
+                self.prepend(&[0xe9]);
+            }
+        }
+    }
+
+    fn call_rel(&mut self, rel: i32) {
+        self.prepend(&rel.to_le_bytes());
+        self.prepend(&[0xe8]);
+    }
+
+    fn jmp_indirect(&mut self, target: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, 4.try_into().unwrap(), target);
+        self.prepend(&[0xff]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
+        }
+    }
+
+    fn call_indirect(&mut self, target: impl Into<RegOrMem>) {
+        let rex = encode_modrm(self, 2.try_into().unwrap(), target);
+        self.prepend(&[0xff]);
+        if rex != 0 {
+            self.prepend(&[rex | 0x40]);
+        }
+    }
+
+    fn ret(&mut self) {
+        self.prepend(&[0xc3]);
+    }
 }
 
 #[cfg(test)]
@@ -264,7 +268,7 @@ mod tests {
     fn reg_names32() {
         let mut code = Vec::<u8>::new();
         for r in Reg::all() {
-            gen::mov32_r_rm(&mut code, r, r);
+            code.mov32_r_rm(r, r);
         }
         let expected: &[(&[u8], &str)] = &[
             (b"\x45\x8b\xff", "mov    r15d,r15d"),
@@ -294,7 +298,7 @@ mod tests {
     fn reg_names64() {
         let mut code = Vec::<u8>::new();
         for r in Reg::all() {
-            gen::mov64_r_rm(&mut code, r, r);
+            code.mov64_r_rm(r, r);
         }
         let expected: &[(&[u8], &str)] = &[
             (b"\x4d\x8b\xff", "mov    r15,r15"),
@@ -325,8 +329,8 @@ mod tests {
         let mut code = Vec::<u8>::new();
         for &r1 in &[Reg::Cx, Reg::R15] {
             for &r2 in &[Reg::Bx, Reg::R15] {
-                gen::mov32_r_rm(&mut code, r1, r2);
-                gen::mov32_rm_r(&mut code, r1, r2);
+                code.mov32_r_rm(r1, r2);
+                code.mov32_rm_r(r1, r2);
             }
         }
         expect_disasm(&code, &[
@@ -343,8 +347,8 @@ mod tests {
         let mut code = Vec::<u8>::new();
         for &r1 in &[Reg::Cx, Reg::R15] {
             for &r2 in &[Reg::Bx, Reg::R15] {
-                gen::mov64_r_rm(&mut code, r1, r2);
-                gen::mov64_rm_r(&mut code, r1, r2);
+                code.mov64_r_rm(r1, r2);
+                code.mov64_rm_r(r1, r2);
             }
         }
         expect_disasm(&code, &[
@@ -362,8 +366,8 @@ mod tests {
     #[test]
     fn mov_rm() {
         let mut code = Vec::<u8>::new();
-        gen::mov32_r_rm(&mut code, Reg::Bx, Mem::base(Reg::Si));
-        gen::mov32_rm_r(&mut code, Mem::base(Reg::R8), Reg::R11);
+        code.mov32_r_rm(Reg::Bx, Mem::base(Reg::Si));
+        code.mov32_rm_r(Mem::base(Reg::R8), Reg::R11);
         expect_disasm(&code, &[
             (b"\x45\x89\x18", "mov    DWORD PTR [r8],r11d"),
             (b"\x8b\x1e",     "mov    ebx,DWORD PTR [rsi]"),
@@ -373,9 +377,9 @@ mod tests {
     #[test]
     fn mov_imm() {
         let mut code = Vec::<u8>::new();
-        gen::mov32_imm(&mut code, Reg::R9, 0x42);
-        gen::mov32_imm(&mut code, Mem::base(Reg::R11), 0x42);
-        gen::mov64_imm(&mut code, Reg::Dx, -2);
+        code.mov32_imm(Reg::R9, 0x42);
+        code.mov32_imm(Mem::base(Reg::R11), 0x42);
+        code.mov64_imm(Reg::Dx, -2);
         expect_disasm(&code, &[
             (b"\x48\xc7\xc2\xfe\xff\xff\xff", "mov    rdx,0xfffffffffffffffe"),
             (b"\x41\xc7\x03\x42\x00\x00\x00", "mov    DWORD PTR [r11],0x42"),
@@ -386,8 +390,8 @@ mod tests {
     #[test]
     fn movabs() {
         let mut code = Vec::<u8>::new();
-        gen::movabs64_imm(&mut code, Reg::Bx, 0x1234567890);
-        gen::movabs64_imm(&mut code, Reg::R9, 0x1234567890);
+        code.movabs64_imm(Reg::Bx, 0x1234567890);
+        code.movabs64_imm(Reg::R9, 0x1234567890);
         expect_disasm(&code, &[
             (b"\x49\xb9\x90\x78\x56\x34\x12\x00\x00\x00", "movabs r9,0x1234567890"),
             (b"\x48\xbb\x90\x78\x56\x34\x12\x00\x00\x00", "movabs rbx,0x1234567890"),
@@ -397,8 +401,8 @@ mod tests {
     #[test]
     fn lea() {
         let mut code = Vec::<u8>::new();
-        gen::lea64(&mut code, Reg::Cx, Mem::base(Reg::R11));
-        gen::lea64(&mut code, Reg::Cx, RipRel(0x42));
+        code.lea64(Reg::Cx, Mem::base(Reg::R11));
+        code.lea64(Reg::Cx, RipRel(0x42));
         expect_disasm(&code, &[
             (b"\x48\x8d\x0d\x42\x00\x00\x00", "lea    rcx,[rip+0x42]"),
             (b"\x49\x8d\x0b",                 "lea    rcx,[r11]"),
@@ -413,7 +417,7 @@ mod tests {
             Binop::Add, Binop::Or, Binop::Adc, Binop::Sbb,
             Binop::And, Binop::Sub, Binop::Xor, Binop::Cmp,
         ] {
-            gen::binop32_r_rm(&mut code, op, Reg::Dx, Reg::Ax);
+            code.binop32_r_rm(op, Reg::Dx, Reg::Ax);
             let mut op_name = format!("{:?}", op);
             op_name.make_ascii_lowercase();
             expected_texts.push(format!("{:3}    edx,eax", op_name));
@@ -438,12 +442,12 @@ mod tests {
     #[test]
     fn binop() {
         let mut code = Vec::<u8>::new();
-        gen::binop32_r_rm(&mut code, Binop::Or, Reg::Ax, Reg::Bx);
-        gen::binop32_rm_r(&mut code, Binop::Or, Reg::Ax, Reg::Bx);
-        gen::binop64_r_rm(&mut code, Binop::Xor, Reg::Ax, Reg::Bx);
-        gen::binop64_rm_r(&mut code, Binop::Xor, Reg::Ax, Reg::Bx);
-        gen::binop32_imm(&mut code, Binop::Sub, Reg::Cx, 0x42);
-        gen::binop64_imm(&mut code, Binop::Sbb, Reg::Cx, 0x42);
+        code.binop32_r_rm(Binop::Or, Reg::Ax, Reg::Bx);
+        code.binop32_rm_r(Binop::Or, Reg::Ax, Reg::Bx);
+        code.binop64_r_rm(Binop::Xor, Reg::Ax, Reg::Bx);
+        code.binop64_rm_r(Binop::Xor, Reg::Ax, Reg::Bx);
+        code.binop32_imm(Binop::Sub, Reg::Cx, 0x42);
+        code.binop64_imm(Binop::Sbb, Reg::Cx, 0x42);
         expect_disasm(&code, &[
             (b"\x48\x81\xd9\x42\x00\x00\x00", "sbb    rcx,0x42"),
             (b"\x81\xe9\x42\x00\x00\x00",     "sub    ecx,0x42"),
@@ -459,7 +463,7 @@ mod tests {
         let mut code = Vec::<u8>::new();
         let mut expected_texts = Vec::new();
         for &op in &[MulOp::Mul, MulOp::Imul, MulOp::Div, MulOp::Idiv] {
-            gen::mul_op32(&mut code, op, Reg::Bx);
+            code.mul_op32(op, Reg::Bx);
             let mut op_name = format!("{:?}", op);
             op_name.make_ascii_lowercase();
             expected_texts.push(format!("{:4}   ebx", op_name));
@@ -480,8 +484,8 @@ mod tests {
     #[test]
     fn mul_op() {
         let mut code = Vec::<u8>::new();
-        gen::mul_op32(&mut code, MulOp::Imul, Reg::R10);
-        gen::mul_op64(&mut code, MulOp::Div, Reg::R10);
+        code.mul_op32(MulOp::Imul, Reg::R10);
+        code.mul_op64(MulOp::Div, Reg::R10);
         expect_disasm(&code, &[
             (b"\x49\xf7\xf2", "div    r10"),
             (b"\x41\xf7\xea", "imul   r10d"),
@@ -491,10 +495,10 @@ mod tests {
     #[test]
     fn push_pop() {
         let mut code = Vec::<u8>::new();
-        gen::push64(&mut code, Reg::Cx);
-        gen::push64(&mut code, Mem::base(Reg::R15));
-        gen::pop64(&mut code, Mem::base(Reg::R15));
-        gen::pop64(&mut code, Reg::Cx);
+        code.push64(Reg::Cx);
+        code.push64(Mem::base(Reg::R15));
+        code.pop64(Mem::base(Reg::R15));
+        code.pop64(Reg::Cx);
         expect_disasm(&code, &[
             (b"\x8f\xc1",     "pop    rcx"),
             (b"\x41\x8f\x07", "pop    QWORD PTR [r15]"),
@@ -509,7 +513,7 @@ mod tests {
         let mut expected_starts = Vec::new();
         for cond in Cond::all() {
             for &rel in &[5, 1000] {
-                gen::jmp_cond(&mut code, cond, rel);
+                code.jmp_cond(cond, rel);
                 let mut cond_name = format!("j{:?} ", cond);
                 cond_name.make_ascii_lowercase();
                 expected_starts.push(cond_name);
@@ -559,10 +563,10 @@ mod tests {
     #[test]
     fn jmp_call_rel() {
         let mut code = Vec::<u8>::new();
-        gen::jmp_rel(&mut code, -2);
-        gen::jmp_rel(&mut code, 1000);
-        gen::jmp_rel(&mut code, RelJumpTarget::Rel32(-5));
-        gen::call_rel(&mut code, -5);
+        code.jmp_rel(-2);
+        code.jmp_rel(1000);
+        code.jmp_rel(RelJumpTarget::Rel32(-5));
+        code.call_rel(-5);
         expect_disasm(&code, &[
             (b"\xe8\xfb\xff\xff\xff", "call   0x0"),
             (b"\xe9\xfb\xff\xff\xff", "jmp    0x5"),
@@ -574,8 +578,8 @@ mod tests {
     #[test]
     fn jmp_call_indirect() {
         let mut code = Vec::<u8>::new();
-        gen::jmp_indirect(&mut code, Reg::Cx);
-        gen::call_indirect(&mut code, Mem::base(Reg::R14));
+        code.jmp_indirect(Reg::Cx);
+        code.call_indirect(Mem::base(Reg::R14));
         expect_disasm(&code, &[
             (b"\x41\xff\x16", "call   QWORD PTR [r14]"),
             (b"\xff\xe1",     "jmp    rcx"),
@@ -585,7 +589,7 @@ mod tests {
     #[test]
     fn ret() {
         let mut code = Vec::<u8>::new();
-        gen::ret(&mut code);
+        code.ret();
         expect_disasm(&code, &[
             (b"\xc3", "ret"),
         ]);
@@ -594,8 +598,8 @@ mod tests {
     #[test]
     fn rip_rel() {
         let mut code = Vec::<u8>::new();
-        gen::mov32_r_rm(&mut code, Reg::Ax, RipRel(2));
-        gen::mov32_r_rm(&mut code, Reg::Bx, RipRel(-2));
+        code.mov32_r_rm(Reg::Ax, RipRel(2));
+        code.mov32_r_rm(Reg::Bx, RipRel(-2));
         expect_disasm(&code, &[
             (b"\x8b\x1d\xfe\xff\xff\xff", "mov    ebx,DWORD PTR [rip+0xfffffffffffffffe]"),
             (b"\x8b\x05\x02\x00\x00\x00", "mov    eax,DWORD PTR [rip+0x2]"),        ]);
@@ -605,7 +609,7 @@ mod tests {
     fn base_only() {
         let mut code = Vec::<u8>::new();
         for base in Reg::all() {
-            gen::mov32_r_rm(&mut code, Reg::Cx, Mem::base(base));
+            code.mov32_r_rm(Reg::Cx, Mem::base(base));
         }
         expect_disasm(&code, &[
             (b"\x41\x8b\x0f",         "mov    ecx,DWORD PTR [r15]"),
@@ -631,7 +635,7 @@ mod tests {
     fn base_only_disp8() {
         let mut code = Vec::<u8>::new();
         for base in Reg::all() {
-            gen::mov32_r_rm(&mut code, Reg::Cx, Mem::base(base).disp(5));
+            code.mov32_r_rm(Reg::Cx, Mem::base(base).disp(5));
         }
         expect_disasm(&code, &[
             (b"\x41\x8b\x4f\x05",     "mov    ecx,DWORD PTR [r15+0x5]"),
@@ -657,7 +661,7 @@ mod tests {
     fn base_only_disp32() {
         let mut code = Vec::<u8>::new();
         for base in Reg::all() {
-            gen::mov32_r_rm(&mut code, Reg::Cx, Mem::base(base).disp(0x333));
+            code.mov32_r_rm(Reg::Cx, Mem::base(base).disp(0x333));
         }
         expect_disasm(&code, &[
             (b"\x41\x8b\x8f\x33\x03\x00\x00",     "mov    ecx,DWORD PTR [r15+0x333]"),
@@ -683,7 +687,7 @@ mod tests {
     fn sib_scales() {
         let mut code = Vec::<u8>::new();
         for &scale in &[1, 2, 4, 8] {
-            gen::mov32_r_rm(&mut code, Reg::Cx, Mem::base(Reg::Bx).index_scale(Reg::Ax, scale));
+            code.mov32_r_rm(Reg::Cx, Mem::base(Reg::Bx).index_scale(Reg::Ax, scale));
         }
         expect_disasm(&code, &[
             (b"\x8b\x0c\xc3", "mov    ecx,DWORD PTR [rbx+rax*8]"),
@@ -701,7 +705,7 @@ mod tests {
         let mut expected_texts = Vec::new();
         for &base in &bases {
             for &index in &indexes {
-                gen::mov32_r_rm(&mut code, Reg::Bx, Mem::base(base).index_scale(index, 2));
+                code.mov32_r_rm(Reg::Bx, Mem::base(base).index_scale(index, 2));
                 expected_texts.push(
                     format!("mov    ebx,DWORD PTR [{}+{}*2]", base.name64(), index.name64()));
             }
@@ -753,7 +757,7 @@ mod tests {
         let mut expected_texts = Vec::new();
         for &base in &bases {
             for &index in &indexes {
-                gen::mov32_r_rm(&mut code, Reg::Bx, Mem::base(base).index_scale(index, 2).disp(-5));
+                code.mov32_r_rm(Reg::Bx, Mem::base(base).index_scale(index, 2).disp(-5));
                 expected_texts.push(
                     format!("mov    ebx,DWORD PTR [{}+{}*2-0x5]", base.name64(), index.name64()));
             }
@@ -805,7 +809,7 @@ mod tests {
         let mut expected_texts = Vec::new();
         for &base in &bases {
             for &index in &indexes {
-                gen::mov32_r_rm(&mut code, Reg::Bx, Mem::base(base).index_scale(index, 2).disp(-0x333));
+                code.mov32_r_rm(Reg::Bx, Mem::base(base).index_scale(index, 2).disp(-0x333));
                 expected_texts.push(
                     format!("mov    ebx,DWORD PTR [{}+{}*2-0x333]", base.name64(), index.name64()));
             }

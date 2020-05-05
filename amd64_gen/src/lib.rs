@@ -2,8 +2,10 @@
 
 use std::convert::{TryFrom, TryInto};
 
-pub mod gen;
+mod gen;
 #[cfg(test)] mod test_util;
+
+pub use gen::GenExt;
 
 pub trait CodeSink {
     // The code grows backwards.

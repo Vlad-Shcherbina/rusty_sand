@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::convert::TryFrom;
 use exe_buf::ExeBuf;
-use amd64_gen::{CodeSink, gen, Reg, Binop, Mem, Cond, MulOp};
+use amd64_gen::{CodeSink, GenExt, Reg, Binop, Mem, Cond, MulOp};
 use crate::interp::opcodes;
 
 #[derive(Default)]
@@ -55,21 +55,21 @@ impl State {
         let mut exe_buf = ExeBufCodeSink::new(ExeBuf::reserve(1 << 30));
 
         // call [rbx].uncompile(rdx)
-        gen::ret(&mut exe_buf);
+        exe_buf.ret();
 
-        gen::pop64(&mut exe_buf, Reg::R8);
-        gen::pop64(&mut exe_buf, Reg::R9);
-        gen::pop64(&mut exe_buf, Reg::R10);
-        gen::pop64(&mut exe_buf, Reg::R11);
+        exe_buf.pop64(Reg::R8);
+        exe_buf.pop64(Reg::R9);
+        exe_buf.pop64(Reg::R10);
+        exe_buf.pop64(Reg::R11);
 
-        gen::call_indirect(&mut exe_buf, Reg::Ax);
-        gen::movabs64_imm(&mut exe_buf, Reg::Ax, State::uncompile as usize as i64);
-        gen::mov64_r_rm(&mut exe_buf, Reg::Cx, Reg::Bx);
+        exe_buf.call_indirect(Reg::Ax);
+        exe_buf.movabs64_imm(Reg::Ax, State::uncompile as usize as i64);
+        exe_buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
-        gen::push64(&mut exe_buf, Reg::R11);
-        gen::push64(&mut exe_buf, Reg::R10);
-        gen::push64(&mut exe_buf, Reg::R9);
-        gen::push64(&mut exe_buf, Reg::R8);
+        exe_buf.push64(Reg::R11);
+        exe_buf.push64(Reg::R10);
+        exe_buf.push64(Reg::R9);
+        exe_buf.push64(Reg::R8);
 
         let uncompile_fn_ptr = exe_buf.cur_pos() as *const u8;
 
@@ -148,14 +148,14 @@ extern "win64" fn fail(s: *const std::os::raw::c_char) {
 
 fn fail_code(buf: &mut ExeBufCodeSink, s: &'static str) {
     assert!(s.ends_with('\0'));
-    gen::call_indirect(buf, Reg::Ax);
+    buf.call_indirect(Reg::Ax);
 
     // ensure 16-byte stack alignment
-    gen::binop64_imm(buf, Binop::Sub, Reg::Sp, 0x80);
-    gen::binop64_imm(buf, Binop::And, Reg::Sp, -16);
+    buf.binop64_imm(Binop::Sub, Reg::Sp, 0x80);
+    buf.binop64_imm(Binop::And, Reg::Sp, -16);
 
-    gen::movabs64_imm(buf, Reg::Ax, fail as usize as i64);
-    gen::movabs64_imm(buf, Reg::Cx, s.as_ptr() as usize as i64);
+    buf.movabs64_imm(Reg::Ax, fail as usize as i64);
+    buf.movabs64_imm(Reg::Cx, s.as_ptr() as usize as i64);
 }
 
 fn is_fallthrough(cmd: u32) -> bool {
@@ -178,7 +178,7 @@ impl State {
             let a = ((insn >> 25) & 7) as u8;
             let a = Reg::try_from(8 + a).unwrap();
             let imm = insn & ((1 << 25) - 1);
-            gen::mov32_imm(buf, a, imm as i32);
+            buf.mov32_imm(a, imm as i32);
             self.stats.ops[op as usize].code_len += end_ptr as usize - buf.cur_pos() as usize;
             return;
         }
@@ -191,10 +191,10 @@ impl State {
         match op {
             opcodes::CMOVE => {
                 let skip = buf.cur_pos();
-                gen::mov32_r_rm(buf, a, b);
+                buf.mov32_r_rm(a, b);
                 let rel = i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap();
-                gen::jmp_cond(buf, Cond::E, rel);
-                gen::binop32_imm(buf, Binop::Cmp, c, 0);
+                buf.jmp_cond(Cond::E, rel);
+                buf.binop32_imm(Binop::Cmp, c, 0);
             }
             opcodes::ARRAY_INDEX => {
                 // TODO: bounds check
@@ -203,11 +203,11 @@ impl State {
                 // mov rax, [self.arrays.ptr + 8 * rax + VEC_PTR_OFFSET]
                 // mov a, [rax + 4 * c]
                 assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
-                gen::mov32_r_rm(buf, a, Mem::base(Reg::Ax).index_scale(c, 4));
-                gen::mov64_r_rm(buf, Reg::Ax,
+                buf.mov32_r_rm(a, Mem::base(Reg::Ax).index_scale(c, 4));
+                buf.mov64_r_rm(Reg::Ax,
                     Mem::base(Reg::Di).index_scale(Reg::Ax, 8)
                     .disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
-                gen::lea64(buf, Reg::Ax, Mem::base(b).index_scale(b, 2));
+                buf.lea64(Reg::Ax, Mem::base(b).index_scale(b, 2));
             }
             opcodes::ARRAY_AMENDMENT => {
                 // TODO: bounds check
@@ -215,25 +215,25 @@ impl State {
                 let skip = buf.cur_pos();
 
                 // jump to the next instruction
-                gen::jmp_indirect(buf, Mem::base(Reg::Si).index_scale(Reg::Ax, 8));
-                gen::mov32_imm(buf, Reg::Ax, i32::try_from(pos + 1).unwrap());
+                buf.jmp_indirect(Mem::base(Reg::Si).index_scale(Reg::Ax, 8));
+                buf.mov32_imm(Reg::Ax, i32::try_from(pos + 1).unwrap());
 
                 // call self.uncompile(b)
-                gen::call_rel(buf, i32::try_from(self.uncompile_fn_ptr as usize - buf.cur_pos() as usize).unwrap());
-                gen::mov64_r_rm(buf, Reg::Dx, b);  // TODO could it be mov32?
+                buf.call_rel(i32::try_from(self.uncompile_fn_ptr as usize - buf.cur_pos() as usize).unwrap());
+                buf.mov64_r_rm(Reg::Dx, b);  // TODO could it be mov32?
 
                 // if jump_targets[b] == jit_trampoline goto skip
-                gen::jmp_cond(buf, Cond::E,
+                buf.jmp_cond(Cond::E,
                     i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap());
-                gen::binop64_rm_r(buf, Binop::Cmp,
+                buf.binop64_rm_r(Binop::Cmp,
                     Mem::base(Reg::Si).index_scale(b, 8),
                     Reg::Bp,
                 );
 
                 // if a != 0 goto skip
-                gen::jmp_cond(buf, Cond::Ne,
+                buf.jmp_cond(Cond::Ne,
                     i32::try_from(skip as usize - buf.cur_pos() as usize).unwrap());
-                gen::binop64_imm(buf, Binop::Cmp, a, 0);  // TODO: could it be binop32?
+                buf.binop64_imm(Binop::Cmp, a, 0);  // TODO: could it be binop32?
 
                 // self.arrays[a][b] <- c
                 //    or
@@ -241,163 +241,164 @@ impl State {
                 // mov rax, [self.arrays.ptr + 8 * rax + VEC_PTR_OFFSET]
                 // mov [rax + 4 * b], c
                 assert_eq!(std::mem::size_of::<Vec<u32>>(), 24);
-                gen::mov32_rm_r(buf, Mem::base(Reg::Ax).index_scale(b, 4), c);
-                gen::mov64_r_rm(buf, Reg::Ax,
+                buf.mov32_rm_r(Mem::base(Reg::Ax).index_scale(b, 4), c);
+                buf.mov64_r_rm(Reg::Ax,
                     Mem::base(Reg::Di).index_scale(Reg::Ax, 8).disp(i32::try_from(VEC_PTR_OFFSET).unwrap()));
-                gen::lea64(buf, Reg::Ax, Mem::base(a).index_scale(a, 2));
+                buf.lea64(Reg::Ax, Mem::base(a).index_scale(a, 2));
             }
             opcodes::ADDITION => {
-                gen::mov32_r_rm(buf, a, Reg::Ax);
-                gen::binop32_r_rm(buf, Binop::Add, Reg::Ax, c);
-                gen::mov32_r_rm(buf, Reg::Ax, b);
+                buf.mov32_r_rm(a, Reg::Ax);
+                buf.binop32_r_rm(Binop::Add, Reg::Ax, c);
+                buf.mov32_r_rm(Reg::Ax, b);
             }
             opcodes::MULTIPLICATION => {
-                gen::mov32_r_rm(buf, a, Reg::Ax);
-                gen::mul_op32(buf, MulOp::Mul, c);
-                gen::mov32_r_rm(buf, Reg::Ax, b);
+                buf.mov32_r_rm(a, Reg::Ax);
+                buf.mul_op32(MulOp::Mul, c);
+                buf.mov32_r_rm(Reg::Ax, b);
             }
             opcodes::DIVISION => {
                 // TODO: maybe explicitly fail on division by zero?
-                gen::mov32_r_rm(buf, a, Reg::Ax);
-                gen::mul_op32(buf, MulOp::Div, c);
-                gen::mov32_r_rm(buf, Reg::Ax, b);
-                gen::binop32_r_rm(buf, Binop::Xor, Reg::Dx, Reg::Dx);
+                buf.mov32_r_rm(a, Reg::Ax);
+                buf.mul_op32(MulOp::Div, c);
+                buf.mov32_r_rm(Reg::Ax, b);
+                buf.binop32_r_rm(Binop::Xor, Reg::Dx, Reg::Dx);
             }
             opcodes::NOT_AND => {
-                gen::mov32_r_rm(buf, a, Reg::Ax);
-                gen::binop32_imm(buf, Binop::Xor, Reg::Ax, -1);
-                gen::binop32_r_rm(buf, Binop::And, Reg::Ax, c);
-                gen::mov32_r_rm(buf, Reg::Ax, b);
+                buf.mov32_r_rm(a, Reg::Ax);
+                buf.binop32_imm(Binop::Xor, Reg::Ax, -1);
+                buf.binop32_r_rm(Binop::And, Reg::Ax, c);
+                buf.mov32_r_rm(Reg::Ax, b);
             }
             opcodes::HALT => {
                 // ret from 'call jump_locations[finger]' in State::run()
-                gen::ret(buf);
+                buf.ret();
 
                 // self.finger <- pos + 1
-                gen::mov32_imm(buf,
-                    Mem::base(Reg::Bx).disp(i32::try_from(memoffset::offset_of!(State, finger)).unwrap()),
+                buf.mov32_imm(
+                    Mem::base(Reg::Bx).disp(i32::try_from(
+                        memoffset::offset_of!(State, finger)).unwrap()),
                     i32::try_from(pos + 1).unwrap());
             }
             opcodes::ALLOCATION => {
                 // update rdi in case self.arrays was reallocated
-                gen::mov64_r_rm(buf, Reg::Di,
+                buf.mov64_r_rm(Reg::Di,
                     Mem::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, arrays) + VEC_PTR_OFFSET).unwrap()));
 
                 // b <- call self.allocation(c)
-                gen::mov32_r_rm(buf, b, Reg::Ax);
+                buf.mov32_r_rm(b, Reg::Ax);
 
-                gen::pop64(buf, Reg::R8);
-                gen::pop64(buf, Reg::R9);
-                gen::pop64(buf, Reg::R10);
-                gen::pop64(buf, Reg::R11);
-                gen::pop64(buf, Reg::R11);  // to align RSP to 16
+                buf.pop64(Reg::R8);
+                buf.pop64(Reg::R9);
+                buf.pop64(Reg::R10);
+                buf.pop64(Reg::R11);
+                buf.pop64(Reg::R11);  // to align RSP to 16
 
-                gen::call_indirect(buf, Reg::Ax);
-                gen::movabs64_imm(buf, Reg::Ax, State::allocation as usize as i64);
-                gen::mov32_r_rm(buf, Reg::Dx, c);
-                gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
+                buf.call_indirect(Reg::Ax);
+                buf.movabs64_imm(Reg::Ax, State::allocation as usize as i64);
+                buf.mov32_r_rm(Reg::Dx, c);
+                buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
-                gen::push64(buf, Reg::R11);  // to align RSP to 16
-                gen::push64(buf, Reg::R11);
-                gen::push64(buf, Reg::R10);
-                gen::push64(buf, Reg::R9);
-                gen::push64(buf, Reg::R8);
+                buf.push64(Reg::R11);  // to align RSP to 16
+                buf.push64(Reg::R11);
+                buf.push64(Reg::R10);
+                buf.push64(Reg::R9);
+                buf.push64(Reg::R8);
             }
             opcodes::ABANDONMENT => {
-                gen::pop64(buf, Reg::R8);
-                gen::pop64(buf, Reg::R9);
-                gen::pop64(buf, Reg::R10);
-                gen::pop64(buf, Reg::R11);
-                gen::pop64(buf, Reg::R11);  // to align RSP to 16
+                buf.pop64(Reg::R8);
+                buf.pop64(Reg::R9);
+                buf.pop64(Reg::R10);
+                buf.pop64(Reg::R11);
+                buf.pop64(Reg::R11);  // to align RSP to 16
 
-                gen::call_indirect(buf, Reg::Ax);
-                gen::movabs64_imm(buf, Reg::Ax, State::abandonment as usize as i64);
-                gen::mov32_r_rm(buf, Reg::Dx, c);
-                gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
+                buf.call_indirect(Reg::Ax);
+                buf.movabs64_imm(Reg::Ax, State::abandonment as usize as i64);
+                buf.mov32_r_rm(Reg::Dx, c);
+                buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
-                gen::push64(buf, Reg::R11);  // to align RSP to 16
-                gen::push64(buf, Reg::R11);
-                gen::push64(buf, Reg::R10);
-                gen::push64(buf, Reg::R9);
-                gen::push64(buf, Reg::R8);
+                buf.push64(Reg::R11);  // to align RSP to 16
+                buf.push64(Reg::R11);
+                buf.push64(Reg::R10);
+                buf.push64(Reg::R9);
+                buf.push64(Reg::R8);
             }
             opcodes::OUTPUT => {
-                gen::pop64(buf, Reg::R8);
-                gen::pop64(buf, Reg::R9);
-                gen::pop64(buf, Reg::R10);
-                gen::pop64(buf, Reg::R11);
-                gen::pop64(buf, Reg::R11);  // to align RSP to 16
+                buf.pop64(Reg::R8);
+                buf.pop64(Reg::R9);
+                buf.pop64(Reg::R10);
+                buf.pop64(Reg::R11);
+                buf.pop64(Reg::R11);  // to align RSP to 16
 
-                gen::call_indirect(buf, Reg::Ax);
-                gen::movabs64_imm(buf, Reg::Ax, output as usize as i64);
-                gen::mov32_r_rm(buf, Reg::Cx, c);
+                buf.call_indirect(Reg::Ax);
+                buf.movabs64_imm(Reg::Ax, output as usize as i64);
+                buf.mov32_r_rm(Reg::Cx, c);
 
-                gen::push64(buf, Reg::R11);  // to align RSP to 16
-                gen::push64(buf, Reg::R11);
-                gen::push64(buf, Reg::R10);
-                gen::push64(buf, Reg::R9);
-                gen::push64(buf, Reg::R8);
+                buf.push64(Reg::R11);  // to align RSP to 16
+                buf.push64(Reg::R11);
+                buf.push64(Reg::R10);
+                buf.push64(Reg::R9);
+                buf.push64(Reg::R8);
             }
             opcodes::INPUT => {
-                gen::mov32_r_rm(buf, c, Reg::Ax);
+                buf.mov32_r_rm(c, Reg::Ax);
 
-                gen::pop64(buf, Reg::R8);
-                gen::pop64(buf, Reg::R9);
-                gen::pop64(buf, Reg::R10);
-                gen::pop64(buf, Reg::R11);
-                gen::pop64(buf, Reg::R11);  // to align RSP to 16
+                buf.pop64(Reg::R8);
+                buf.pop64(Reg::R9);
+                buf.pop64(Reg::R10);
+                buf.pop64(Reg::R11);
+                buf.pop64(Reg::R11);  // to align RSP to 16
 
-                gen::call_indirect(buf, Reg::Ax);
-                gen::movabs64_imm(buf, Reg::Ax, input as usize as i64);
+                buf.call_indirect(Reg::Ax);
+                buf.movabs64_imm(Reg::Ax, input as usize as i64);
 
-                gen::push64(buf, Reg::R11);  // to align RSP to 16
-                gen::push64(buf, Reg::R11);
-                gen::push64(buf, Reg::R10);
-                gen::push64(buf, Reg::R9);
-                gen::push64(buf, Reg::R8);
+                buf.push64(Reg::R11);  // to align RSP to 16
+                buf.push64(Reg::R11);
+                buf.push64(Reg::R10);
+                buf.push64(Reg::R9);
+                buf.push64(Reg::R8);
             }
             opcodes::LOAD_PROGRAM => {
                 // TODO: assert regs[b] == 0
                 // TODO: assert regs[c] < jump_locations.len()
 
-                gen::jmp_indirect(buf, Mem::base(Reg::Si).index_scale(c, 8));
-                gen::mov64_r_rm(buf, Reg::Ax, c);
+                buf.jmp_indirect(Mem::base(Reg::Si).index_scale(c, 8));
+                buf.mov64_r_rm(Reg::Ax, c);
 
                 let no_fail = buf.cur_pos();
                 fail_code(buf, "LOAD_PROGRAM: c >= arrays[0].len()\0");
-                gen::jmp_cond(buf, Cond::B,
+                buf.jmp_cond(Cond::B,
                     i32::try_from(no_fail as usize - buf.cur_pos() as usize).unwrap());
-                gen::binop64_r_rm(buf, Binop::Cmp, c,
+                buf.binop64_r_rm(Binop::Cmp, c,
                     Mem::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, jump_locations) + VEC_LEN_OFFSET).unwrap()));
 
                 let no_switch_code = buf.cur_pos();
 
                 // rsi <- jump_locations
-                gen::mov64_r_rm(buf, Reg::Si,
+                buf.mov64_r_rm(Reg::Si,
                     Mem::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, jump_locations) + VEC_PTR_OFFSET).unwrap()));
 
-                gen::pop64(buf, Reg::Ax);
-                gen::pop64(buf, Reg::R8);
-                gen::pop64(buf, Reg::R9);
-                gen::pop64(buf, Reg::R10);
-                gen::pop64(buf, Reg::R11);
-                gen::call_indirect(buf, Reg::Ax);
-                gen::movabs64_imm(buf, Reg::Ax, State::switch_code as usize as i64);
-                gen::mov64_r_rm(buf, Reg::Dx, b);
-                gen::mov64_r_rm(buf, Reg::Cx, Reg::Bx);
-                gen::push64(buf, Reg::R11);
-                gen::push64(buf, Reg::R10);
-                gen::push64(buf, Reg::R9);
-                gen::push64(buf, Reg::R8);
-                gen::push64(buf, Reg::Ax);
+                buf.pop64(Reg::Ax);
+                buf.pop64(Reg::R8);
+                buf.pop64(Reg::R9);
+                buf.pop64(Reg::R10);
+                buf.pop64(Reg::R11);
+                buf.call_indirect(Reg::Ax);
+                buf.movabs64_imm(Reg::Ax, State::switch_code as usize as i64);
+                buf.mov64_r_rm(Reg::Dx, b);
+                buf.mov64_r_rm(Reg::Cx, Reg::Bx);
+                buf.push64(Reg::R11);
+                buf.push64(Reg::R10);
+                buf.push64(Reg::R9);
+                buf.push64(Reg::R8);
+                buf.push64(Reg::Ax);
 
                 // if b != 0 goto no_switch_code
-                gen::jmp_cond(buf, Cond::E, i32::try_from(
+                buf.jmp_cond(Cond::E, i32::try_from(
                     no_switch_code as usize - buf.cur_pos() as usize).unwrap());
-                gen::binop64_imm(buf, Binop::Cmp, b, 0);  // TODO: could be binop32
+                buf.binop64_imm(Binop::Cmp, b, 0);  // TODO: could be binop32
             }
             _ => panic!("op: {}", op),
         }
