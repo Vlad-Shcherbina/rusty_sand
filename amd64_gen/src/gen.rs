@@ -179,18 +179,37 @@ pub trait GenExt: CodeSink + Sized {
     }
 
     fn binop32_imm(&mut self, op: Binop, rm: impl RegOrMem, imm: i32) {
-        self.prepend(&imm.to_le_bytes());
-        let rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
-        self.prepend(&[0x81]);
+        let rex;
+        match i8::try_from(imm) {
+            Ok(imm) => {
+                self.prepend(&[imm as u8]);
+                rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
+                self.prepend(&[0x83]);
+            }
+            Err(_) => {
+                self.prepend(&imm.to_le_bytes());
+                rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
+                self.prepend(&[0x81]);
+            }
+        }
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
     fn binop64_imm(&mut self, op: Binop, rm: impl RegOrMem, imm: i32) {
-        self.prepend(&imm.to_le_bytes());
-        let rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
-        self.prepend(&[rex | 0x48, 0x81]);
+        match i8::try_from(imm) {
+            Ok(imm) => {
+                self.prepend(&[imm as u8]);
+                let rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
+                self.prepend(&[rex | 0x48, 0x83]);
+            }
+            Err(_) => {
+                self.prepend(&imm.to_le_bytes());
+                let rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
+                self.prepend(&[rex | 0x48, 0x81]);
+            }
+        }
     }
 
     fn mul_op32(&mut self, op: MulOp, rm: impl RegOrMem) {
@@ -471,10 +490,14 @@ mod tests {
         code.binop64_r_rm(Binop::Xor, Reg::Ax, Reg::Bx);
         code.binop64_rm_r(Binop::Xor, Reg::Ax, Reg::Bx);
         code.binop32_imm(Binop::Sub, Reg::Cx, 0x42);
+        code.binop32_imm(Binop::Sub, Reg::Cx, 0x4242);
         code.binop64_imm(Binop::Sbb, Reg::Cx, 0x42);
+        code.binop64_imm(Binop::Sbb, Reg::Cx, 0x4242);
         expect_disasm(&code, &[
-            (b"\x48\x81\xd9\x42\x00\x00\x00", "sbb    rcx,0x42"),
-            (b"\x81\xe9\x42\x00\x00\x00",     "sub    ecx,0x42"),
+            (b"\x48\x81\xd9\x42\x42\x00\x00", "sbb    rcx,0x4242"),
+            (b"\x48\x83\xd9\x42",             "sbb    rcx,0x42"),
+            (b"\x81\xe9\x42\x42\x00\x00",     "sub    ecx,0x4242"),
+            (b"\x83\xe9\x42",                 "sub    ecx,0x42"),
             (b"\x48\x31\xd8",                 "xor    rax,rbx"),
             (b"\x48\x33\xc3",                 "xor    rax,rbx"),
             (b"\x09\xd8",                     "or     eax,ebx"),
