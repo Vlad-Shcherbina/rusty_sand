@@ -88,51 +88,47 @@ impl Reg {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct RipRel(pub i32);
+
+#[derive(Clone, Copy, Debug)]
 pub struct Mem {
     base: Reg,
-    index_scale: Option<(Reg, u8)>,
     disp: i32,
 }
 
 impl Mem {
-    pub fn base(base: Reg) -> Mem {
-        Mem {
-            base,
-            index_scale: None,
-            disp: 0,
-        }
+    pub fn base(base: Reg) -> Self {
+        Self { base, disp: 0 }
     }
 
-    pub fn index_scale(self, index: Reg, scale: u8) -> Mem {
+    pub fn index_scale(self, index: Reg, scale: u8) -> MemSIB {
         assert!(index != Reg::Sp);
-        Mem {
-            index_scale: Some((index, scale)),
-            ..self
+        assert!(scale == 1 || scale == 2 || scale == 4 || scale == 8);
+        MemSIB {
+            base: self.base,
+            index,
+            scale,
+            disp: self.disp,
         }
     }
 
-    pub fn disp(self, disp: i32) -> Mem {
-        Mem {
-            disp,
-            ..self
-        }
+    pub fn disp(self, disp: i32) -> Self {
+        Self { disp, ..self }
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum RegOrMem {
-    Reg(Reg),
-    RipRel(i32),
-    Mem(Mem),
-}
-pub use RegOrMem::RipRel;
-
-impl From<Reg> for RegOrMem {
-    fn from(r: Reg) -> Self { Self::Reg(r) }
+pub struct MemSIB {
+    base: Reg,
+    index: Reg,
+    scale: u8,
+    disp: i32,
 }
 
-impl From<Mem> for RegOrMem {
-    fn from(m: Mem) -> Self { Self::Mem(m) }
+impl MemSIB {
+    pub fn disp(self, disp: i32) -> Self {
+        Self { disp, ..self }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

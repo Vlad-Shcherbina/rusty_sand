@@ -1,116 +1,142 @@
 use super::*;
 
-// return r, x, b bits of REX prefix
-fn encode_modrm(sink: &mut impl CodeSink, r1: Reg, rm: impl Into<RegOrMem>) -> u8 {
-    let rm: RegOrMem = rm.into();
-    let r1 = r1 as u8;
-    let r1_modrm = (r1 & 7) << 3;
-    let r1_rex = (r1 & 8) >> 1;
-    match rm {
-        RegOrMem::Reg(r2) => {
-            let r2 = r2 as u8;
-            sink.prepend(&[0b11_000_000 | r1_modrm | (r2 & 7)]);
-            r1_rex | r2 >> 3
-        }
-        RipRel(disp) => {
-            sink.prepend(&disp.to_le_bytes());
-            sink.prepend(&[0b00_000_101 | r1_modrm]);
-            r1_rex
-        }
-        RegOrMem::Mem(Mem { base, index_scale: None, disp }) => {
-            let base = base as u8;
-            #[allow(clippy::identity_op)]
-            match i8::try_from(disp) {
-                Ok(0) if base & 7 != 4 && base & 7 != 5 =>
-                    sink.prepend(&[0b00_000_000 | r1_modrm | (base & 7)]),
-                Ok(disp) =>
-                    if base & 7 != 4 {
-                        sink.prepend(&[0b01_000_000 | r1_modrm | (base & 7), disp as u8]);
-                    } else {
-                        sink.prepend(&[0b01_000_100 | r1_modrm, 0b00_100_100, disp as u8]);
-                    }
-                Err(_) =>
-                    if base & 7 != 4 {
-                        sink.prepend(&disp.to_le_bytes());
-                        sink.prepend(&[0b10_000_000 | r1_modrm | (base & 7)]);
-                    } else {
-                        sink.prepend(&disp.to_le_bytes());
-                        sink.prepend(&[0b10_000_100 | r1_modrm, 0b00_100_100]);
-                    }
-            }
-            r1_rex | base >> 3
-        }
-        RegOrMem::Mem(Mem { base, index_scale: Some((index, scale)), disp }) => {
-            assert!(index != Reg::Sp);
-            let base = base as u8;
-            let index = index as u8;
-            let scale = match scale {
-                1 => 0,
-                2 => 1,
-                4 => 2,
-                8 => 3,
-                _ => panic!("{}", scale),
-            };
-            let sib = scale << 6
-                    | (index & 7) << 3
-                    | base & 7;
-            match i8::try_from(disp) {
-                Ok(0) if base & 7 != 5 =>
-                    sink.prepend(&[0b00_000_100 | r1_modrm, sib]),
-                Ok(disp) => {
-                    sink.prepend(&[0b01_000_100 | r1_modrm, sib, disp as u8]);
+pub trait RegOrMem {
+    fn is_reg(&self) -> bool;
+
+    // return r, x, b bits of REX prefix
+    fn encode_modrm(&self, r1: Reg, sink: &mut impl CodeSink) -> u8;
+}
+
+impl RegOrMem for Reg {
+    fn is_reg(&self) -> bool { true }
+
+    fn encode_modrm(&self, r1: Reg, sink: &mut impl CodeSink) -> u8 {
+        let r1_modrm = (r1 as u8 & 7) << 3;
+        let r1_rex = (r1 as u8 & 8) >> 1;
+        let r2 = *self as u8;
+        sink.prepend(&[0b11_000_000 | r1_modrm | (r2 & 7)]);
+        r1_rex | r2 >> 3
+    }
+}
+
+impl RegOrMem for RipRel {
+    fn is_reg(&self) -> bool { false }
+
+    fn encode_modrm(&self, r1: Reg, sink: &mut impl CodeSink) -> u8 {
+        let r1_modrm = (r1 as u8 & 7) << 3;
+        let r1_rex = (r1 as u8 & 8) >> 1;
+        let disp = self.0;
+        sink.prepend(&disp.to_le_bytes());
+        sink.prepend(&[0b00_000_101 | r1_modrm]);
+        r1_rex
+    }
+}
+
+impl RegOrMem for Mem {
+    fn is_reg(&self) -> bool { false }
+
+    fn encode_modrm(&self, r1: Reg, sink: &mut impl CodeSink) -> u8 {
+        let r1_modrm = (r1 as u8 & 7) << 3;
+        let r1_rex = (r1 as u8 & 8) >> 1;
+        let base = self.base as u8;
+        #[allow(clippy::identity_op)]
+        match i8::try_from(self.disp) {
+            Ok(0) if base & 7 != 4 && base & 7 != 5 =>
+                sink.prepend(&[0b00_000_000 | r1_modrm | (base & 7)]),
+            Ok(disp) =>
+                if base & 7 != 4 {
+                    sink.prepend(&[0b01_000_000 | r1_modrm | (base & 7), disp as u8]);
+                } else {
+                    sink.prepend(&[0b01_000_100 | r1_modrm, 0b00_100_100, disp as u8]);
                 }
-                Err(_) => {
-                    sink.prepend(&disp.to_le_bytes());
-                    sink.prepend(&[0b10_000_100 | r1_modrm, sib]);
+            Err(_) =>
+                if base & 7 != 4 {
+                    sink.prepend(&self.disp.to_le_bytes());
+                    sink.prepend(&[0b10_000_000 | r1_modrm | (base & 7)]);
+                } else {
+                    sink.prepend(&self.disp.to_le_bytes());
+                    sink.prepend(&[0b10_000_100 | r1_modrm, 0b00_100_100]);
                 }
-            }
-            r1_rex | base >> 3 | index >> 3 << 1
         }
+        r1_rex | base >> 3
+    }
+}
+
+impl RegOrMem for MemSIB {
+    fn is_reg(&self) -> bool { false }
+
+    fn encode_modrm(&self, r1: Reg, sink: &mut impl CodeSink) -> u8 {
+        let r1_modrm = (r1 as u8 & 7) << 3;
+        let r1_rex = (r1 as u8 & 8) >> 1;
+        assert!(self.index != Reg::Sp);
+        let base = self.base as u8;
+        let index = self.index as u8;
+        let scale = match self.scale {
+            1 => 0,
+            2 => 1,
+            4 => 2,
+            8 => 3,
+            _ => panic!("{}", self.scale),
+        };
+        let sib = scale << 6
+                | (index & 7) << 3
+                | base & 7;
+        match i8::try_from(self.disp) {
+            Ok(0) if base & 7 != 5 =>
+                sink.prepend(&[0b00_000_100 | r1_modrm, sib]),
+            Ok(disp) => {
+                sink.prepend(&[0b01_000_100 | r1_modrm, sib, disp as u8]);
+            }
+            Err(_) => {
+                sink.prepend(&self.disp.to_le_bytes());
+                sink.prepend(&[0b10_000_100 | r1_modrm, sib]);
+            }
+        }
+        r1_rex | base >> 3 | index >> 3 << 1
     }
 }
 
 impl<T: CodeSink> GenExt for T {}
 
 pub trait GenExt: CodeSink + Sized {
-    fn mov32_r_rm(&mut self, r: Reg, rm: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, r, rm);
+    fn mov32_r_rm(&mut self, r: Reg, rm: impl RegOrMem) {
+        let rex = rm.encode_modrm(r, self);
         self.prepend(&[0x8B]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
-    fn mov64_r_rm(&mut self, r: Reg, rm: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, r, rm);
+    fn mov64_r_rm(&mut self, r: Reg, rm: impl RegOrMem) {
+        let rex = rm.encode_modrm(r, self);
         self.prepend(&[rex | 0x48, 0x8B]);
     }
 
-    fn mov32_rm_r(&mut self, rm: impl Into<RegOrMem>, r: Reg) {
-        let rex = encode_modrm(self, r, rm);
+    fn mov32_rm_r(&mut self, rm: impl RegOrMem, r: Reg) {
+        let rex = rm.encode_modrm(r, self);
         self.prepend(&[0x89]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
-    fn mov64_rm_r(&mut self, rm: impl Into<RegOrMem>, r: Reg) {
-        let rex = encode_modrm(self, r, rm);
+    fn mov64_rm_r(&mut self, rm: impl RegOrMem, r: Reg) {
+        let rex = rm.encode_modrm(r, self);
         self.prepend(&[rex | 0x48, 0x89]);
     }
 
-    fn mov32_imm(&mut self, rm: impl Into<RegOrMem>, imm: i32) {
+    fn mov32_imm(&mut self, rm: impl RegOrMem, imm: i32) {
         self.prepend(&imm.to_le_bytes());
-        let rex = encode_modrm(self, 0.try_into().unwrap(), rm);
+        let rex = rm.encode_modrm(0.try_into().unwrap(), self);
         self.prepend(&[0xc7]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
-    fn mov64_imm(&mut self, rm: impl Into<RegOrMem>, imm: i32) {
+    fn mov64_imm(&mut self, rm: impl RegOrMem, imm: i32) {
         self.prepend(&imm.to_le_bytes());
-        let rex = encode_modrm(self, 0.try_into().unwrap(), rm);
+        let rex = rm.encode_modrm(0.try_into().unwrap(), self);
         self.prepend(&[rex | 0x48, 0xc7]);
     }
 
@@ -120,70 +146,68 @@ pub trait GenExt: CodeSink + Sized {
         self.prepend(&[0x48 | r >> 3, 0xb8 | r & 7]);
     }
 
-    fn lea64(&mut self, r: Reg, m: impl Into<RegOrMem> + Copy) {
-        if let RegOrMem::Reg(_) = m.into() {
-            panic!("lea with register");
-        }
-        let rex = encode_modrm(self, r, m);
+    fn lea64(&mut self, r: Reg, m: impl RegOrMem) {
+        assert!(!m.is_reg(), "lea with register");
+        let rex = m.encode_modrm(r, self);
         self.prepend(&[rex | 0x48, 0x8d]);
     }
 
-    fn binop32_r_rm(&mut self, op: Binop, r: Reg, rm: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, r, rm);
+    fn binop32_r_rm(&mut self, op: Binop, r: Reg, rm: impl RegOrMem) {
+        let rex = rm.encode_modrm(r, self);
         self.prepend(&[op as u8 * 8 + 3]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
-    fn binop64_r_rm(&mut self, op: Binop, r: Reg, rm: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, r, rm);
+    fn binop64_r_rm(&mut self, op: Binop, r: Reg, rm: impl RegOrMem) {
+        let rex = rm.encode_modrm(r, self);
         self.prepend(&[rex | 0x48, op as u8 * 8 + 3]);
     }
 
-    fn binop32_rm_r(&mut self, op: Binop, rm: impl Into<RegOrMem>, r: Reg) {
-        let rex = encode_modrm(self, r, rm);
+    fn binop32_rm_r(&mut self, op: Binop, rm: impl RegOrMem, r: Reg) {
+        let rex = rm.encode_modrm(r, self);
         self.prepend(&[op as u8 * 8 + 1]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
-    fn binop64_rm_r(&mut self, op: Binop, rm: impl Into<RegOrMem>, r: Reg) {
-        let rex = encode_modrm(self, r, rm);
+    fn binop64_rm_r(&mut self, op: Binop, rm: impl RegOrMem, r: Reg) {
+        let rex = rm.encode_modrm(r, self);
         self.prepend(&[rex | 0x48, op as u8 * 8 + 1]);
     }
 
-    fn binop32_imm(&mut self, op: Binop, rm: impl Into<RegOrMem>, imm: i32) {
+    fn binop32_imm(&mut self, op: Binop, rm: impl RegOrMem, imm: i32) {
         self.prepend(&imm.to_le_bytes());
-        let rex = encode_modrm(self, (op as u8).try_into().unwrap(), rm);
+        let rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
         self.prepend(&[0x81]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
-    fn binop64_imm(&mut self, op: Binop, rm: impl Into<RegOrMem>, imm: i32) {
+    fn binop64_imm(&mut self, op: Binop, rm: impl RegOrMem, imm: i32) {
         self.prepend(&imm.to_le_bytes());
-        let rex = encode_modrm(self, (op as u8).try_into().unwrap(), rm);
+        let rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
         self.prepend(&[rex | 0x48, 0x81]);
     }
 
-    fn mul_op32(&mut self, op: MulOp, rm: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, (op as u8).try_into().unwrap(), rm);
+    fn mul_op32(&mut self, op: MulOp, rm: impl RegOrMem) {
+        let rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
         self.prepend(&[0xf7]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
-    fn mul_op64(&mut self, op: MulOp, rm: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, (op as u8).try_into().unwrap(), rm);
+    fn mul_op64(&mut self, op: MulOp, rm: impl RegOrMem) {
+        let rex = rm.encode_modrm((op as u8).try_into().unwrap(), self);
         self.prepend(&[rex | 0x48, 0xf7]);
     }
 
-    fn push64(&mut self, rm: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, 6.try_into().unwrap(), rm);
+    fn push64(&mut self, rm: impl RegOrMem) {
+        let rex = rm.encode_modrm(6.try_into().unwrap(), self);
         self.prepend(&[0xff]);
         if rex != 0 {
             // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
@@ -192,8 +216,8 @@ pub trait GenExt: CodeSink + Sized {
         }
     }
 
-    fn pop64(&mut self, rm: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, 0.try_into().unwrap(), rm);
+    fn pop64(&mut self, rm: impl RegOrMem) {
+        let rex = rm.encode_modrm(0.try_into().unwrap(), self);
         self.prepend(&[0x8f]);
         if rex != 0 {
             // rex.W bit is implied for 64-bit (because 32-bit version is illegal),
@@ -232,16 +256,16 @@ pub trait GenExt: CodeSink + Sized {
         self.prepend(&[0xe8]);
     }
 
-    fn jmp_indirect(&mut self, target: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, 4.try_into().unwrap(), target);
+    fn jmp_indirect(&mut self, target: impl RegOrMem) {
+        let rex = target.encode_modrm(4.try_into().unwrap(), self);
         self.prepend(&[0xff]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
         }
     }
 
-    fn call_indirect(&mut self, target: impl Into<RegOrMem>) {
-        let rex = encode_modrm(self, 2.try_into().unwrap(), target);
+    fn call_indirect(&mut self, target: impl RegOrMem) {
+        let rex = target.encode_modrm(2.try_into().unwrap(), self);
         self.prepend(&[0xff]);
         if rex != 0 {
             self.prepend(&[rex | 0x40]);
