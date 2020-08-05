@@ -89,7 +89,7 @@ impl State {
 
 #[naked]
 unsafe fn jit_trampoline() {
-    llvm_asm!("
+    asm!("
     // push all win64 volatile registers
     push rax
     //push rcx
@@ -102,7 +102,7 @@ unsafe fn jit_trampoline() {
     mov rcx, rbx  // arg1 = self
     mov edx, eax  // finger
     sub rsp, 0x20
-    call $0  // state.compile(finger)
+    call {compile}  // state.compile(finger)
     add rsp, 0x20
 
     // pop all win64 volatile registers
@@ -116,8 +116,9 @@ unsafe fn jit_trampoline() {
 
     // resume execution of the compiled code
     jmp [rsi + 8 * rax]
-    "
-    : : "i"(State::compile as usize) : : "intel");
+    ",
+    compile = sym State::compile
+    );
 }
 
 extern "win64" fn output(c: u32) {
