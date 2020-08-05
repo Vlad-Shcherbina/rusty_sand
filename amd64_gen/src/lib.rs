@@ -1,5 +1,3 @@
-#![feature(track_caller)]
-
 use std::convert::{TryFrom, TryInto};
 
 mod gen;
