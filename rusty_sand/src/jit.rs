@@ -88,7 +88,7 @@ impl State {
 }
 
 #[naked]
-unsafe fn jit_trampoline() {
+unsafe extern "win64" fn jit_trampoline() {
     asm!("
     // push all win64 volatile registers
     push rax
@@ -117,7 +117,8 @@ unsafe fn jit_trampoline() {
     // resume execution of the compiled code
     jmp [rsi + 8 * rax]
     ",
-    compile = sym State::compile
+    compile = sym State::compile,
+    options(noreturn),
     );
 }
 
