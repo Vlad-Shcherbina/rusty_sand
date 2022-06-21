@@ -1,5 +1,4 @@
-#![feature(asm)]
-#![feature(llvm_asm)]
+#![feature(asm_sym)]
 #![feature(naked_functions)]
 
 pub mod interp;

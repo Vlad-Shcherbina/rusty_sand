@@ -89,7 +89,7 @@ impl State {
 
 #[naked]
 unsafe extern "win64" fn jit_trampoline() {
-    asm!("
+    std::arch::asm!("
     // push all win64 volatile registers
     push rax
     //push rcx
@@ -143,7 +143,7 @@ extern "win64" fn fail(s: *const std::os::raw::c_char) {
     let s = unsafe { std::ffi::CStr::from_ptr(s) };
     println!("fail: {}", s.to_str().unwrap());
     unsafe {
-        llvm_asm!("int3");
+        std::arch::asm!("int3");
     }
     std::process::exit(1);
 }
@@ -493,36 +493,37 @@ impl State {
         //
         // r08..r15 -> regs[]
         unsafe {
-            llvm_asm!("
+            std::arch::asm!("
+            push rbx
+            push rbp
+            mov rbx, {se}
+            mov rbp, {tr}
             call [rsi + 8 * rax]
-            "
-            :
-              "={r8d}"(self.regs[0]),
-              "={r9d}"(self.regs[1]),
-              "={r10d}"(self.regs[2]),
-              "={r11d}"(self.regs[3]),
-              "={r12d}"(self.regs[4]),
-              "={r13d}"(self.regs[5]),
-              "={r14d}"(self.regs[6]),
-              "={r15d}"(self.regs[7])
-            :
-              "{rbx}"(self as *mut _),
-              "{rsi}"(self.jump_locations.as_ptr()),
-              "{rdi}"(self.arrays.as_ptr()),
-              "{rbp}"(jit_trampoline as usize),
-              "{rax}"(self.finger),
-              "{r8d}"(self.regs[0]),
-              "{r9d}"(self.regs[1]),
-              "{r10d}"(self.regs[2]),
-              "{r11d}"(self.regs[3]),
-              "{r12d}"(self.regs[4]),
-              "{r13d}"(self.regs[5]),
-              "{r14d}"(self.regs[6]),
-              "{r15d}"(self.regs[7])
-            : "memory", "cc", "rcx", "rdx"
-            : "intel");
-            // TODO: in win64 calling convention, XMM, YMM, ZMM are also
-            // considired volatile and should be added to clobber.
+            pop rbp
+            pop rbx
+            ",
+            // Can't use rbx and rbp directly,
+            // because LLVM attaches special meaning to them.
+            se = in(reg) self as *mut _,
+            tr = in(reg) jit_trampoline as usize,
+
+            in("rsi") self.jump_locations.as_ptr(),
+            in("rdi") self.arrays.as_ptr(),
+            in("rax") self.finger,
+
+            inout("r8d") self.regs[0],
+            inout("r9d") self.regs[1],
+            inout("r10d") self.regs[2],
+            inout("r11d") self.regs[3],
+            inout("r12d") self.regs[4],
+            inout("r13d") self.regs[5],
+            inout("r14d") self.regs[6],
+            inout("r15d") self.regs[7],
+
+            clobber_abi("win64"),
+            // This automatically clobbers rcx and rdx, among other things.
+            // See https://doc.rust-lang.org/nightly/reference/inline-assembly.html#abi-clobbers
+            );
         }
         // println!("done");
     }
