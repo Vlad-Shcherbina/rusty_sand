@@ -5,7 +5,7 @@
 pub struct ExeBuf {
     reserved_start: *mut u8,
     start: *mut u8,
-    end: *mut u8,
+    _end: *mut u8,
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -37,7 +37,7 @@ impl ExeBuf {
         ExeBuf {
             reserved_start,
             start: end,
-            end,
+            _end: end,
         }
     }
 

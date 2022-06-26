@@ -9,7 +9,7 @@ use winapi::um::winnt::*;
 pub struct ExeBuf {
     reserved_start: *mut u8,
     start: *mut u8,
-    end: *mut u8,
+    _end: *mut u8,
     page_size_mask: usize,
 }
 
@@ -40,7 +40,7 @@ impl ExeBuf {
         ExeBuf {
             reserved_start: ptr,
             start: end,
-            end,
+            _end: end,
             page_size_mask,
         }
     }

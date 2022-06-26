@@ -45,7 +45,7 @@ fn main() {
                 total_cnt += s.cnt;
                 total_code_len += s.code_len;
             }
-            eprintln!("{:>10} {:>10}  {}", total_cnt, total_code_len, "total");
+            eprintln!("{:>10} {:>10}  total", total_cnt, total_code_len);
         }
     } else {
         let mut m = interp::Machine::new(prog);

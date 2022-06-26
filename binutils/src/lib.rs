@@ -64,7 +64,7 @@ fn invoke_gas(obj_filename: &str) -> std::process::Child {
         .spawn().unwrap()
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub struct Insn {
     pub bytes: Vec<u8>,
     pub text: String,
@@ -96,7 +96,7 @@ fn parse_objdump(dump: &str) -> Vec<Insn> {
             .collect();
         let text_and_comment = it.next().unwrap();
         assert!(it.next().is_none());
-        let pos = text_and_comment.find('#').unwrap_or_else(|| text_and_comment.len());
+        let pos = text_and_comment.find('#').unwrap_or(text_and_comment.len());
         Insn {
             bytes,
             text: text_and_comment[..pos].trim().to_string(),
