@@ -4,9 +4,6 @@ version = "0.1.0"
 authors = ["Vlad Shcherbina <vlad.shcherbina@gmail.com>"]
 edition = "2018"
 
-[features]
-clippy = []  # https://github.com/rust-lang/cargo/issues/8075
-
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "*", features = ["memoryapi", "sysinfoapi"] }
 

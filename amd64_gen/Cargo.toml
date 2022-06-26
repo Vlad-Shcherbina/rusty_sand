@@ -7,8 +7,5 @@ edition = "2018"
 [dev-dependencies]
 binutils = { path = "../binutils" }
 
-[features]
-clippy = []  # https://github.com/rust-lang/cargo/issues/8075
-
 [lib]
 doctest = false

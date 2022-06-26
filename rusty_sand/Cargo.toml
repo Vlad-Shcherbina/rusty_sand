@@ -10,8 +10,5 @@ mimalloc = { version = "*", default-features = false, optional = true }
 exe_buf = { path = "../exe_buf" }
 amd64_gen = { path = "../amd64_gen" }
 
-[features]
-clippy = []  # https://github.com/rust-lang/cargo/issues/8075
-
 [lib]
 doctest = false
