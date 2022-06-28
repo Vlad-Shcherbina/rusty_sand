@@ -47,3 +47,11 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
+
+      - run: cargo build --release --features=mimalloc
+
+      - name: benchmark interpreter
+        run: cargo run -p rusty_sand --release --features=mimalloc --bin main data/sandmark.umz --stats
+
+      - name: benchmark JIT
+        run: cargo run -p rusty_sand --release --features=mimalloc --bin main data/sandmark.umz --stats --jit
