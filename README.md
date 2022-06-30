@@ -1,3 +1,5 @@
+A simple JIT for a virtual machine defined in http://boundvariable.org/.
+
 ### Benchmark
 
 Interpreter:
