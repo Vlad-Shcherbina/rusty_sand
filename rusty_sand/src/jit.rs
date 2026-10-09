@@ -492,6 +492,8 @@ impl State {
         // call jump_locations[finger]
         //
         // r08..r15 -> regs[]
+
+        let mut regs = self.regs.map(u64::from);
         unsafe {
             std::arch::asm!("
             push rbx
@@ -509,22 +511,23 @@ impl State {
 
             inout("rsi") self.jump_locations.as_ptr() => _,
             inout("rdi") self.arrays.as_ptr() => _,
-            in("rax") self.finger,
+            in("rax") u64::from(self.finger),
 
-            inout("r8d") self.regs[0],
-            inout("r9d") self.regs[1],
-            inout("r10d") self.regs[2],
-            inout("r11d") self.regs[3],
-            inout("r12d") self.regs[4],
-            inout("r13d") self.regs[5],
-            inout("r14d") self.regs[6],
-            inout("r15d") self.regs[7],
+            inout("r8") regs[0],
+            inout("r9") regs[1],
+            inout("r10") regs[2],
+            inout("r11") regs[3],
+            inout("r12") regs[4],
+            inout("r13") regs[5],
+            inout("r14") regs[6],
+            inout("r15") regs[7],
 
             clobber_abi("win64"),
             // This automatically clobbers rcx and rdx, among other things.
             // See https://doc.rust-lang.org/nightly/reference/inline-assembly.html#abi-clobbers
             );
         }
+        self.regs = regs.map(|r| r as u32);
         // println!("done");
     }
 }
