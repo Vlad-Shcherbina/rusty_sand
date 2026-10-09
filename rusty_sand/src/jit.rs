@@ -87,9 +87,9 @@ impl State {
     }
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "win64" fn jit_trampoline() {
-    std::arch::asm!("
+    std::arch::naked_asm!("
     // push all win64 volatile registers
     push rax
     //push rcx
@@ -118,7 +118,6 @@ unsafe extern "win64" fn jit_trampoline() {
     jmp [rsi + 8 * rax]
     ",
     compile = sym State::compile,
-    options(noreturn),
     );
 }
 
