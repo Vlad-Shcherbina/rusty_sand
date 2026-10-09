@@ -507,8 +507,8 @@ impl State {
             se = in(reg) self as *mut _,
             tr = in(reg) jit_trampoline as *const () as usize,
 
-            in("rsi") self.jump_locations.as_ptr(),
-            in("rdi") self.arrays.as_ptr(),
+            inout("rsi") self.jump_locations.as_ptr() => _,
+            inout("rdi") self.arrays.as_ptr() => _,
             in("rax") self.finger,
 
             inout("r8d") self.regs[0],
