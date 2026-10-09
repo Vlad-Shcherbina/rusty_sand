@@ -2,7 +2,7 @@
 name = "amd64_gen"
 version = "0.1.0"
 authors = ["Vlad Shcherbina <vlad.shcherbina@gmail.com>"]
-edition = "2018"
+edition = "2024"
 
 [dev-dependencies]
 binutils = { path = "../binutils" }
