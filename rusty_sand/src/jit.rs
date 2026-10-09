@@ -61,11 +61,13 @@ impl State {
         exe_buf.pop64(Reg::R9);
         exe_buf.pop64(Reg::R10);
         exe_buf.pop64(Reg::R11);
+        exe_buf.binop64_imm(Binop::Add, Reg::Sp, 0x20);
 
         exe_buf.call_indirect(Reg::Ax);
         exe_buf.movabs64_imm(Reg::Ax, State::uncompile as *const () as usize as i64);
         exe_buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
+        exe_buf.binop64_imm(Binop::Sub, Reg::Sp, 0x20); // win64 shadow space
         exe_buf.push64(Reg::R11);
         exe_buf.push64(Reg::R10);
         exe_buf.push64(Reg::R9);
@@ -101,7 +103,7 @@ unsafe extern "win64" fn jit_trampoline() {
 
     mov rcx, rbx  // arg1 = self
     mov edx, eax  // finger
-    sub rsp, 0x20
+    sub rsp, 0x20  // win64 shadow space
     call {compile}  // state.compile(finger)
     add rsp, 0x20
 
@@ -294,14 +296,15 @@ impl State {
                 buf.pop64(Reg::R9);
                 buf.pop64(Reg::R10);
                 buf.pop64(Reg::R11);
-                buf.pop64(Reg::R11);  // to align RSP to 16
+                buf.binop64_imm(Binop::Add, Reg::Sp, 0x28);
 
                 buf.call_indirect(Reg::Ax);
                 buf.movabs64_imm(Reg::Ax, State::allocation as *const () as usize as i64);
                 buf.mov32_r_rm(Reg::Dx, c);
                 buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
-                buf.push64(Reg::R11);  // to align RSP to 16
+                // win64 shadow space, plus 8 to align RSP to 16
+                buf.binop64_imm(Binop::Sub, Reg::Sp, 0x28);
                 buf.push64(Reg::R11);
                 buf.push64(Reg::R10);
                 buf.push64(Reg::R9);
@@ -312,14 +315,15 @@ impl State {
                 buf.pop64(Reg::R9);
                 buf.pop64(Reg::R10);
                 buf.pop64(Reg::R11);
-                buf.pop64(Reg::R11);  // to align RSP to 16
+                buf.binop64_imm(Binop::Add, Reg::Sp, 0x28);
 
                 buf.call_indirect(Reg::Ax);
                 buf.movabs64_imm(Reg::Ax, State::abandonment as *const () as usize as i64);
                 buf.mov32_r_rm(Reg::Dx, c);
                 buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
-                buf.push64(Reg::R11);  // to align RSP to 16
+                // win64 shadow space, plus 8 to align RSP to 16
+                buf.binop64_imm(Binop::Sub, Reg::Sp, 0x28);
                 buf.push64(Reg::R11);
                 buf.push64(Reg::R10);
                 buf.push64(Reg::R9);
@@ -330,13 +334,14 @@ impl State {
                 buf.pop64(Reg::R9);
                 buf.pop64(Reg::R10);
                 buf.pop64(Reg::R11);
-                buf.pop64(Reg::R11);  // to align RSP to 16
+                buf.binop64_imm(Binop::Add, Reg::Sp, 0x28);
 
                 buf.call_indirect(Reg::Ax);
                 buf.movabs64_imm(Reg::Ax, output as *const () as usize as i64);
                 buf.mov32_r_rm(Reg::Cx, c);
 
-                buf.push64(Reg::R11);  // to align RSP to 16
+                // win64 shadow space, plus 8 to align RSP to 16
+                buf.binop64_imm(Binop::Sub, Reg::Sp, 0x28);
                 buf.push64(Reg::R11);
                 buf.push64(Reg::R10);
                 buf.push64(Reg::R9);
@@ -349,12 +354,13 @@ impl State {
                 buf.pop64(Reg::R9);
                 buf.pop64(Reg::R10);
                 buf.pop64(Reg::R11);
-                buf.pop64(Reg::R11);  // to align RSP to 16
+                buf.binop64_imm(Binop::Add, Reg::Sp, 0x28);
 
                 buf.call_indirect(Reg::Ax);
                 buf.movabs64_imm(Reg::Ax, input as *const () as usize as i64);
 
-                buf.push64(Reg::R11);  // to align RSP to 16
+                // win64 shadow space, plus 8 to align RSP to 16
+                buf.binop64_imm(Binop::Sub, Reg::Sp, 0x28);
                 buf.push64(Reg::R11);
                 buf.push64(Reg::R10);
                 buf.push64(Reg::R9);
@@ -382,20 +388,21 @@ impl State {
                     Mem::base(Reg::Bx).disp(i32::try_from(
                         memoffset::offset_of!(State, jump_locations) + VEC_PTR_OFFSET).unwrap()));
 
-                buf.pop64(Reg::Ax);
                 buf.pop64(Reg::R8);
                 buf.pop64(Reg::R9);
                 buf.pop64(Reg::R10);
                 buf.pop64(Reg::R11);
+                buf.binop64_imm(Binop::Add, Reg::Sp, 0x28);
                 buf.call_indirect(Reg::Ax);
                 buf.movabs64_imm(Reg::Ax, State::switch_code as *const () as usize as i64);
                 buf.mov64_r_rm(Reg::Dx, b);
                 buf.mov64_r_rm(Reg::Cx, Reg::Bx);
+                // win64 shadow space, plus 8 to align RSP to 16
+                buf.binop64_imm(Binop::Sub, Reg::Sp, 0x28);
                 buf.push64(Reg::R11);
                 buf.push64(Reg::R10);
                 buf.push64(Reg::R9);
                 buf.push64(Reg::R8);
-                buf.push64(Reg::Ax);
 
                 // if b != 0 goto no_switch_code
                 buf.jmp_cond(Cond::E, i32::try_from(
