@@ -164,8 +164,8 @@ fn is_fallthrough(cmd: u32) -> bool {
     op != opcodes::HALT && op != opcodes::LOAD_PROGRAM
 }
 
-const VEC_PTR_OFFSET: usize = 0;
-#[cfg(test)] const VEC_CAPACITY_OFFSET: usize = 8;
+const VEC_PTR_OFFSET: usize = 8;
+#[cfg(test)] const VEC_CAPACITY_OFFSET: usize = 0;
 const VEC_LEN_OFFSET: usize = 16;
 
 impl State {
@@ -546,8 +546,10 @@ mod tests {
 
     }
 
+    // "aaa_" to make it lexicographically first, because if layout changes,
+    // this test provides nice diagnostics, while other tests segfault.
     #[test]
-    fn vec_layout() {
+    fn aaa_vec_layout() {
         // From Vec documentation:
         // "Vec is and always will be a (pointer, capacity, length) triplet.
         // No more, no less. The order of these fields is completely
