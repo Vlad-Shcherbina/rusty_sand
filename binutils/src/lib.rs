@@ -41,7 +41,7 @@ impl Obj {
 
     pub fn insns(self) -> Vec<Insn> {
         let p = Command::new("bash")
-            .args(&["-c", &format!("objdump -d --insn-width=15 {} -M intel", self.filename())])
+            .args(["-c", &format!("objdump -d --insn-width=15 {} -M intel", self.filename())])
             .stdout(Stdio::piped())
             .spawn().unwrap();
         let res = p.wait_with_output().unwrap();
@@ -56,7 +56,7 @@ impl Obj {
 fn invoke_gas(obj_filename: &str) -> std::process::Child {
     // explicitly calling bash to ensure it also works on Windows with WSL
     Command::new("bash")
-        .args(&[
+        .args([
             "-c",
             &format!("as --64 -msyntax=intel -mnaked-reg --strip-local-absolute -o {}", obj_filename),
         ])

@@ -1,12 +1,12 @@
 use std::fmt;
 
 pub trait ByteSliceHex {
-    fn fmt_hex(&self) -> ByteSliceHexFormatter;
+    fn fmt_hex(&self) -> ByteSliceHexFormatter<'_>;
 }
 
 impl<T> ByteSliceHex for T
 where T: std::ops::Deref<Target=[u8]> {
-    fn fmt_hex(&self) -> ByteSliceHexFormatter {
+    fn fmt_hex(&self) -> ByteSliceHexFormatter<'_> {
         ByteSliceHexFormatter {
             bytes: self.deref(),
         }

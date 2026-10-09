@@ -63,7 +63,7 @@ impl State {
         exe_buf.pop64(Reg::R11);
 
         exe_buf.call_indirect(Reg::Ax);
-        exe_buf.movabs64_imm(Reg::Ax, State::uncompile as usize as i64);
+        exe_buf.movabs64_imm(Reg::Ax, State::uncompile as *const () as usize as i64);
         exe_buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
         exe_buf.push64(Reg::R11);
@@ -71,9 +71,9 @@ impl State {
         exe_buf.push64(Reg::R9);
         exe_buf.push64(Reg::R8);
 
-        let uncompile_fn_ptr = exe_buf.cur_pos() as *const u8;
+        let uncompile_fn_ptr = exe_buf.cur_pos();
 
-        let jt = jit_trampoline as usize as *const u8;
+        let jt = jit_trampoline as *const () as usize as *const u8;
         State {
             finger: 0,
             regs: [0; 8],
@@ -155,7 +155,7 @@ fn fail_code(buf: &mut ExeBufCodeSink, s: &'static str) {
     buf.binop64_imm(Binop::Sub, Reg::Sp, 0x80);
     buf.binop64_imm(Binop::And, Reg::Sp, -16);
 
-    buf.movabs64_imm(Reg::Ax, fail as usize as i64);
+    buf.movabs64_imm(Reg::Ax, fail as *const () as usize as i64);
     buf.movabs64_imm(Reg::Cx, s.as_ptr() as usize as i64);
 }
 
@@ -296,7 +296,7 @@ impl State {
                 buf.pop64(Reg::R11);  // to align RSP to 16
 
                 buf.call_indirect(Reg::Ax);
-                buf.movabs64_imm(Reg::Ax, State::allocation as usize as i64);
+                buf.movabs64_imm(Reg::Ax, State::allocation as *const () as usize as i64);
                 buf.mov32_r_rm(Reg::Dx, c);
                 buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
@@ -314,7 +314,7 @@ impl State {
                 buf.pop64(Reg::R11);  // to align RSP to 16
 
                 buf.call_indirect(Reg::Ax);
-                buf.movabs64_imm(Reg::Ax, State::abandonment as usize as i64);
+                buf.movabs64_imm(Reg::Ax, State::abandonment as *const () as usize as i64);
                 buf.mov32_r_rm(Reg::Dx, c);
                 buf.mov64_r_rm(Reg::Cx, Reg::Bx);
 
@@ -332,7 +332,7 @@ impl State {
                 buf.pop64(Reg::R11);  // to align RSP to 16
 
                 buf.call_indirect(Reg::Ax);
-                buf.movabs64_imm(Reg::Ax, output as usize as i64);
+                buf.movabs64_imm(Reg::Ax, output as *const () as usize as i64);
                 buf.mov32_r_rm(Reg::Cx, c);
 
                 buf.push64(Reg::R11);  // to align RSP to 16
@@ -351,7 +351,7 @@ impl State {
                 buf.pop64(Reg::R11);  // to align RSP to 16
 
                 buf.call_indirect(Reg::Ax);
-                buf.movabs64_imm(Reg::Ax, input as usize as i64);
+                buf.movabs64_imm(Reg::Ax, input as *const () as usize as i64);
 
                 buf.push64(Reg::R11);  // to align RSP to 16
                 buf.push64(Reg::R11);
@@ -387,7 +387,7 @@ impl State {
                 buf.pop64(Reg::R10);
                 buf.pop64(Reg::R11);
                 buf.call_indirect(Reg::Ax);
-                buf.movabs64_imm(Reg::Ax, State::switch_code as usize as i64);
+                buf.movabs64_imm(Reg::Ax, State::switch_code as *const () as usize as i64);
                 buf.mov64_r_rm(Reg::Dx, b);
                 buf.mov64_r_rm(Reg::Cx, Reg::Bx);
                 buf.push64(Reg::R11);
@@ -425,7 +425,7 @@ impl State {
             // let code = unsafe {std::slice::from_raw_parts(yyy, zzz as usize - yyy as usize) };
             // dbg!(crate::binutils::Obj::from_bytes(code).insns());
             // crate::binutils::Obj::from_bytes(code).insns();
-            self.jump_locations[i as usize] = self.exe_buf.cur_pos();
+            self.jump_locations[i] = self.exe_buf.cur_pos();
         }
         self.stats.compile_time += timer.elapsed().as_secs_f64();
     }
@@ -504,7 +504,7 @@ impl State {
             // Can't use rbx and rbp directly,
             // because LLVM attaches special meaning to them.
             se = in(reg) self as *mut _,
-            tr = in(reg) jit_trampoline as usize,
+            tr = in(reg) jit_trampoline as *const () as usize,
 
             in("rsi") self.jump_locations.as_ptr(),
             in("rdi") self.arrays.as_ptr(),

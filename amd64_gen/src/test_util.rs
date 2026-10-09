@@ -31,7 +31,7 @@ fn format_disasm_literal<'a>(disasm: impl Iterator<Item=(&'a [u8], &'a str)>) ->
 
 #[track_caller]
 pub fn expect_disasm(code: &[u8], expected_disasm: &[(&[u8], &str)]) {
-    let insns = ::binutils::Obj::from_bytes(&code).insns();
+    let insns = ::binutils::Obj::from_bytes(code).insns();
     let it0 = insns.iter().map(|i| (i.bytes.as_slice(), i.text.as_str()));
     let mut eq = true;
     let mut it = it0.clone();
