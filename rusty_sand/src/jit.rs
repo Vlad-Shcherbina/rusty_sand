@@ -122,8 +122,9 @@ unsafe extern "win64" fn jit_trampoline() {
 }
 
 extern "win64" fn output(c: u32) {
-    print!("{}", u8::try_from(c).unwrap() as char);
-    std::io::stdout().flush().unwrap();
+    let mut stdout = std::io::stdout();
+    stdout.write_all(&[u8::try_from(c).unwrap()]).unwrap();
+    stdout.flush().unwrap();
 }
 
 extern "win64" fn input() -> u32 {

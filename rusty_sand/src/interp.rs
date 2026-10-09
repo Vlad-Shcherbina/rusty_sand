@@ -141,8 +141,9 @@ impl Machine {
                     self.free.push(regs[c]);
                 }
                 opcodes::OUTPUT => {
-                    print!("{}", u8::try_from(regs[c]).unwrap() as char);
-                    std::io::stdout().flush().unwrap();
+                    let mut stdout = std::io::stdout();
+                    stdout.write_all(&[u8::try_from(regs[c]).unwrap()]).unwrap();
+                    stdout.flush().unwrap();
                 }
                 opcodes::INPUT => {
                     let mut ch = 0u8;
